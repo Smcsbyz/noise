@@ -3834,7 +3834,7 @@
       ]
     }),
 
-    /* ---------- 1.5) 2004 版门户新闻页：UI TEST 直通，正式线索暂不挂 ---------- */
+    /* ---------- 1.5) 2004 版门户新闻页：只挂在时光机存档里，正式线索暂不挂 ---------- */
     'news-2004-demo': news2004Page({
       title: '本地少儿节目《欢乐好时光》下月起重播 电视台称「应观众要求」',
       source: '今日视界·社会新闻',
@@ -3901,7 +3901,7 @@
            在存档列表里点开；
          · IMDb 词条页已经没有搜索入口：原来「imdb」「happy with us imdb」
            两条映射已删，普通浏览器搜不到、也进不去。页面本身仍留在
-           PAGE_HTML 里，只由开发面板（DEV_TESTS）直达，供调试用。 */
+           PAGE_HTML 里，普通玩家没有入口，仅供内部核对文案。 */
     'search-imdb': searchPage({
       query: 'Happy With Us',
       elapsed: '0.06',
@@ -8849,7 +8849,7 @@
   /* 取第 no 篇稿子的语调，永远返回 pos / neg / mid 之一：
        1. 先读 localStorage 里的提交存档 —— 它才是事实来源。
           提交时 saveSubmitted() 同时写内存和存档，两边本来一致；
-          但在控制台手动改存档、或 UI TEST 直接点结局这类场景里，
+          但在控制台手动改存档、或直接从存档触发结局这类场景里，
           内存还没跟着刷新，只有存档是新的。存档优先，
           「伪造全负面存档再点结局」才不会被上一轮的旧记录盖住。
        2. 存档整个读不出来（隐私模式、被禁用）才退回内存的那份。
@@ -9909,162 +9909,6 @@
   });
 
   /* ============================================================
-     十、开发测试面板（仅调试用，可整段删除）
-     ------------------------------------------------------------
-     屏幕最左侧固定一条 16 个按钮的竖向列表，点一下直接把主内容区
-     切到对应界面，方便逐页核对 UI。
-     删除方式：本段 JS + index.html 的 #devPanel + css/desktop.css
-     末尾「开发测试面板」一节，三处一起删掉即无残留。
-     说明：写稿器 / 时光机默认要装完 LinkWriter 才进得去，这里先补
-     一次安装态再切换，否则按钮切不过去、左侧导航也不会高亮。
-     ============================================================ */
-
-  const devPanel = document.getElementById('devPanel');
-  const devPanelList = document.getElementById('devPanelList');
-
-  function devEnsurePlugin() {
-    if (isPluginInstalled()) return;
-    setPluginInstalled();
-    applyPluginState();
-    renderSidebar();
-  }
-
-  /* 浏览器内的具体网页：先切到浏览器，再按 pageId 渲染 */
-  function devBrowser(pageId) {
-    switchTab('browser');
-    if (pageId) renderPage(pageId);
-  }
-
-  /* 时光机：year 为空 → 首页；传年份 → 直接进该年快照 */
-  function devWayback(year) {
-    devEnsurePlugin();
-    switchTab('wayback');
-
-    if (!year) {
-      showWbView('home');
-      return;
-    }
-    openSnapshot(year);
-  }
-
-  const DEV_TESTS = [
-    { label: '首页',       run: () => devBrowser('home') },
-    { label: '新闻详情',   run: () => devBrowser('lost-media') },
-    { label: '搜索结果',   run: () => { switchTab('browser'); runSearch('欢乐好时光'); } },
-    { label: '求助帖',     run: () => devBrowser('forum-thread') },
-    { label: 'IMDb',       run: () => devBrowser('imdb-happy') },
-    { label: '视频页',     run: () => devBrowser('video-happy-original') },
-    { label: '新闻',       run: () => devBrowser('news-2009-jimmy') },
-    { label: '04版新闻',   run: () => devBrowser('news-2004-demo') },
-    { label: '星火官网',   run: () => { switchTab('browser'); renderPage('spark-corp'); } },
-    { label: '写稿器',     run: () => { devEnsurePlugin(); switchTab('write'); } },
-    { label: '资料库',     run: () => switchTab('library') },
-    { label: '收件箱',     run: () => { switchTab('mail'); setMailView('inbox'); } },
-    { label: '时光机',     run: () => devWayback(null) },
-    { label: '01版粉丝站', run: () => devWayback(2001) },
-  ];
-
-  /* ---------- 结局演出直通按钮 ----------
-     四个结局各一个。点之前必须先把上一场收干净：清掉还在排队的
-     逐行 setTimeout、把黑场收起来并清空文字、让主窗口淡回来。
-     不然连点会撞车——上一场的字还在往容器里塞，新一场又从第一行
-     开始，两段演出夹在一起。 */
-  const DEV_ENDING_TESTS = [
-    { label: '测试结局A（坏）',   type: 'bad' },
-    { label: '测试结局B（好）',   type: 'good' },
-    { label: '测试结局C（平庸）', type: 'neutral' },
-    { label: '测试结局D（真）',   type: 'true' }
-  ];
-
-  /* 把上一场演出整场收回初始态，不碰任何存档 */
-  function devResetEnding() {
-    clearEndingTimers();      /* 逐行弹出、标题、按钮的定时器一个不留 */
-    /* 真结局的配乐也一并收掉：测试面板可以连点，上一场若没走退出流程，
-       配乐会和下一场叠在一起（同一个元素，其实是「接着播」，但位置不对）。 */
-    stopTrueEndingAudio();
-    endingRunning = false;    /* 允许紧接着再演一场 */
-
-    const overlay = document.getElementById('ending-overlay');
-    const box = document.getElementById('ending-text-container');
-    const rewrite = document.getElementById('rewrite-btn');
-
-    if (overlay) {
-      overlay.classList.remove('is-open');
-      overlay.setAttribute('aria-hidden', 'true');
-    }
-    if (box) {
-      box.innerHTML = '';
-      box.scrollTop = 0;
-      /* 测试面板可以连点重播：上一场若卡在真结局的淡出段，先摘掉这个类 */
-      box.classList.remove('is-fading-out');
-    }
-    if (rewrite) rewrite.style.display = 'none';
-
-    /* 主窗口恢复显示：容器是 #layout，老写法 .main-window 一并兜住 */
-    const shell = document.getElementById('layout');
-    if (shell) shell.classList.remove('main-window-fade-out');
-    document.body.classList.remove('ending-bg-fade');
-
-    /* 测试面板重播前把上一场的崩坏残留清干净：
-       面板可以连点第二场，上一场若没走完退出流程，红化会赖着不走。 */
-    setSystemGlitch(false);
-    const shells = document.querySelectorAll('.main-window');
-    for (let i = 0; i < shells.length; i++) {
-      shells[i].classList.remove('main-window-fade-out');
-    }
-  }
-
-  function devPlayEnding(type) {
-    devResetEnding();
-    triggerEnding(type);
-  }
-
-  if (devPanel && devPanelList) {
-    DEV_TESTS.forEach(test => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'dev-test';
-      btn.textContent = test.label;
-      btn.title = '预览：' + test.label;
-
-      btn.addEventListener('click', () => {
-        /* 单个按钮出错不影响其它按钮，也不弹窗打断预览 */
-        try {
-          test.run();
-        } catch (err) {
-          console.error('[dev panel] 「' + test.label + '」渲染失败：', err);
-        }
-      });
-
-      devPanelList.appendChild(btn);
-    });
-
-    /* 底部：一条分隔线 + 结局演出四连测 */
-    const sep = document.createElement('div');
-    sep.className = 'dev-sep';
-    sep.textContent = '结局演出';
-    devPanelList.appendChild(sep);
-
-    DEV_ENDING_TESTS.forEach(test => {
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'dev-test is-ending';
-      btn.textContent = test.label;
-      btn.title = '预览：' + test.label;
-
-      btn.addEventListener('click', () => {
-        try {
-          devPlayEnding(test.type);
-        } catch (err) {
-          console.error('[dev panel] 「' + test.label + '」演出失败：', err);
-        }
-      });
-
-      devPanelList.appendChild(btn);
-    });
-  }
-
-  /* ============================================================
      十一、移动端适配（手机横屏）
      ------------------------------------------------------------
      三件事：
@@ -10149,17 +9993,6 @@
       ).matches;
       if (!narrow) chatShellEl.classList.remove('is-chat-open');
     });
-  })();
-
-  /* ---------- 调试用：不玩流程也能预览结局 ----------
-     地址栏后面加 ?ending=true（或 good / bad / neutral），页面加载完
-     就直接演那一场，专门用来调节奏。正式发布不想要可以整块删掉，
-     删了不影响任何功能。 */
-  (function debugPreviewEnding() {
-    let m = null;
-    try { m = /[?&]ending=([a-z]+)/.exec(location.search); } catch (e) {}
-    if (!m) return;
-    window.setTimeout(() => triggerEnding(m[1]), 800);
   })();
 
 })();
