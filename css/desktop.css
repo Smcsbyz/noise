@@ -5701,6 +5701,10 @@ body.plugin-on [data-requires-plugin] { animation: sideReveal 0.3s ease both; }
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.02em;
+  /* 角标是「新手指南」四个字，任何时候都得横着排：容器一窄就折行，
+     折出来的两行会盖住缩略图中央的图标。PC 卡片最窄 200px、
+     角标只有 67px，这条在 PC 上不改变任何一个像素。 */
+  white-space: nowrap;
   color: #fff;
   background: rgba(255, 255, 255, 0.22);
   border: 1px solid rgba(255, 255, 255, 0.42);
@@ -11273,5 +11277,183 @@ body.theme-search-dark .unlock-interface .unlock-back .back-link:hover {
   .wbm-cal-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 14px 16px;
+  }
+}
+
+/* ============================================================
+   移动端视口铺满（dvh 三级兜底）
+   ------------------------------------------------------------
+   手机 / 平板横屏时，浏览器顶部的地址栏、底部的标签栏会吃掉一条真实
+   屏幕，而 100vh / height:100% 量的是「布局视口」—— 工具栏收起时的
+   那个高度。于是工具栏一展开：
+     · 窗口比可见区高，底部的「发送」「提交稿件」被压出屏幕；
+     · 整页多出几十像素，能上下拖，拖出来是一片白底。
+   这里把高度改成三级链路，任何一级都能撑住整屏：
+
+     100vh                → 老浏览器（不认识 dvh，这一条生效）
+     100dvh               → 支持动态视口的浏览器，工具栏收放时自动变
+     var(--app-vh, …)     → JS 跟 visualViewport 实时算出的最准值
+
+   顺序不能调换：后一条覆盖前一条。JS 一旦写上 --app-vh 就用它；
+   脚本没跑 / 被拦时自动退到 dvh，再不行退到 vh。
+   只作用于窄屏与横屏，PC 的居中悬浮窗一条都不碰。
+   ============================================================ */
+@media (max-width: 768px),
+       (orientation: landscape) and (max-height: 500px) and (max-width: 1024px) {
+
+  /* 滚动条只能长在应用窗口内部，html / body 一律不准滚。
+     overscroll-behavior 顺手把「下拉刷新 / 顶部回弹」也关掉 ——
+     横屏游戏里误触下拉会把整页拽出半屏白底。 */
+  html {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  body {
+    height: 100%;
+    height: 100dvh;
+    overflow: hidden;
+    overscroll-behavior: none;
+  }
+
+  #layout {
+    /* 高度三级兜底 */
+    height: 100vh !important;
+    height: 100dvh !important;
+    height: var(--app-vh, 100dvh) !important;
+
+    max-height: 100vh !important;
+    max-height: 100dvh !important;
+    max-height: var(--app-vh, 100dvh) !important;
+
+    /* 窗口自己不吃滚动传播，拖到边缘也不会把整页带下去 */
+    overscroll-behavior: none;
+  }
+}
+
+/* ------------------------------------------------------------
+   触屏平板（含 iPad 横屏 1024×768）
+   ------------------------------------------------------------
+   这个尺寸走的是桌面那套居中悬浮窗，不进上面的窄屏规则；但 iOS Safari
+   横屏的 100vh 同样是大视口，工具栏展开时窗口下沿会被顶出一点。
+   所以只在「触屏设备」这层把 vh 换成 dvh 兜底，鼠标设备一条都不改，
+   两个断点互不干扰。
+   ------------------------------------------------------------ */
+@media (hover: none) and (pointer: coarse) {
+  #layout {
+    height: calc(100vh - 48px);
+    height: calc(100dvh - 48px);
+    height: calc(var(--app-vh, 100dvh) - 48px);
+
+    max-height: 85vh;
+    max-height: 85dvh;
+    max-height: calc(var(--app-vh, 100dvh) * 0.85);
+  }
+}
+
+/* ------------------------------------------------------------
+   横屏首次进入的工具栏提示
+   ------------------------------------------------------------
+   只在「触屏 + 横屏 + 从没看过」时出现一次，5 秒后淡出，
+   pointer-events:none 所以不挡任何点击；PC 端 display:none，永不出现。
+   ------------------------------------------------------------ */
+.fullscreen-tip { display: none; }
+
+@media (max-width: 768px),
+       (orientation: landscape) and (max-height: 500px) and (max-width: 1024px) {
+  /* 放右上角，不去挤底部操作区：底部的「发送 / 提交稿件」正是玩家要点的
+     东西，提示盖在上面哪怕不挡点击也会让人分心。右上角在三个模块里
+     都是空白（聊天头部右侧、写稿器标题右侧、邮件发件人右侧）。 */
+  .fullscreen-tip {
+    display: block;
+    position: fixed;
+    top: calc(8px + env(safe-area-inset-top, 0px));
+    right: calc(10px + env(safe-area-inset-right, 0px));
+    left: auto;
+    bottom: auto;
+    transform: none;
+    z-index: 800;                      /* 高于 #layout(10)，低于登录屏(9000) */
+    max-width: calc(100vw - 120px);
+    padding: 5px 12px;
+    border-radius: 999px;
+    background: rgba(10, 12, 16, 0.58);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 11.5px;
+    line-height: 1.5;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+    visibility: hidden;
+    opacity: 0;
+    transition: opacity 0.45s ease, visibility 0s linear 0.45s;
+  }
+  .fullscreen-tip.is-on {
+    visibility: visible;
+    opacity: 1;
+    transition: opacity 0.35s ease, visibility 0s;
+  }
+}
+/* ============================================================
+   收藏夹（资料库）移动端修整
+   ------------------------------------------------------------
+   现象：手机横屏进「我的收藏夹」，卡片被压成又窄又高的长条，
+   标题从中间硬断，角标「新手指南」在极窄的卡片里折成两行、
+   压到缩略图中间的图标上。
+
+   根因两处：
+   1) 手机横屏档把网格写成了 minmax(150px, 1fr)。auto-fill 会尽量
+      多塞列：844×390 分出 4 列（每列 181px）、568×320 分出 3 列
+      （每列 154px）。150px 的下限是给「一排缩略图」定的，
+      放「标题 + 来源」两行文字根本不够。
+   2) .bm-badge 没有 white-space:nowrap，卡片越窄它越可能折行。
+
+   对策：窄屏把列宽下限抬到 220px（PC 的 200px 一行不动），
+   角标锁死单行并加省略号兜底，左侧留白按安全区补足。
+   仅作用于「横屏 + 高度 ≤ 500px」的手机档。
+   ============================================================ */
+
+@media (orientation: landscape) and (max-height: 500px) {
+
+  /* 左侧留白：轨道 50px 之外再留 16px，卡片不贴紫色导航；
+     底部补安全区，iPhone 横屏的手势条不会切掉最后一行卡片的圆角 */
+  .library-body {
+    padding-left: 16px;
+    padding-right: 16px;
+    padding-bottom: calc(24px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* 列宽下限 150 → 220：844 出 3 列（243px）、667 出 2 列（284px）、
+     568 出 2 列（235px）。!important 用来压过上面 7650 行那条
+     minmax(150px, 1fr)。 */
+  .library-grid {
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)) !important;
+    gap: 16px;
+  }
+
+  /* 卡片本体：允许列内收缩，避免长标题把网格撑破 */
+  .bm-card { min-width: 0; }
+
+  /* 卡片变宽了，缩略图相应压矮一点，一屏能看到下一行卡片的上沿 */
+  .bm-thumb { height: 110px; }
+  .bm-icon { font-size: 34px; }
+
+  .bm-info { padding: 10px 12px 12px; }
+  .bm-info b { font-size: 13.5px; line-height: 1.45; }
+
+  /* 角标：单行 + 溢出省略。max-width 按住左右各 8px，
+     就算以后换成更长的文案也不会顶出缩略图、更不会折行 */
+  .bm-badge {
+    top: 8px;
+    left: 8px;
+    max-width: calc(100% - 16px);
+    padding: 3px 9px;
+    font-size: 12px;
+    white-space: nowrap !important;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
 }

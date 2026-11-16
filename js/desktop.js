@@ -5612,6 +5612,9 @@
            等这一帧布局算完再滚，否则读到的仍是旧值。 */
         window.requestAnimationFrame(() => { scrollLog(); });
 
+        /* 登录屏渐隐 0.8s，等它退干净再放工具栏提示，否则会被压在底下 */
+        window.setTimeout(maybeShowFullscreenTip, 900);
+
         /* 收掉输入焦点：不然光标还在那块正在淡出的屏里闪 */
         input.blur();
       } else {
@@ -9932,30 +9935,70 @@
       });
     }
 
-    /* ② 键盘弹起时同步窗口高度
+    /* ② 视口高度：把「真实可见高度」写进 --app-vh
        --app-vh      ：可视区高度（#layout 与三块全屏浮层共用）
        --app-vv-top  ：可视区相对布局视口的纵向偏移（iOS 上推可视区时用）
-       写入合并到一帧：键盘升降动画期间 resize / scroll 每帧都会来，
-       直接写会让整窗跟着重排，观感是「键盘一动，界面抖一下」。 */
+       CSS 侧还有 100dvh / 100vh 两级兜底，这里只为拿到最准的那个数：
+       浏览器工具栏收放、软键盘升降时，只有 visualViewport 知道真实可见区。
+       写入合并到一帧：这段时间 resize / scroll 每帧都来，直接写会让整窗
+       跟着重排，观感是「一动就抖一下」。 */
     const vv = window.visualViewport;
-    if (vv) {
-      let vvRaf = 0;
-      const writeViewportVars = () => {
+
+    const writeViewportVars = () => {
+      const root = document.documentElement;
+      const h = vv ? vv.height : window.innerHeight;
+      const top = vv ? (vv.offsetTop || 0) : 0;
+      /* 用 round 不用 floor：iOS 的可视高常带小数，floor 会在底部留一条
+         1px 的缝把白底透出来；CSS 那边 #layout 是 overflow:hidden，
+         多出来的半像素不会变成滚动条。 */
+      root.style.setProperty('--app-vh', Math.round(h) + 'px');
+      root.style.setProperty('--app-vv-top', Math.max(0, Math.round(top)) + 'px');
+    };
+
+    let vvRaf = 0;
+
+    const syncViewport = () => {
+      if (vvRaf) return;
+      vvRaf = window.requestAnimationFrame(() => {
         vvRaf = 0;
-        const root = document.documentElement;
-        root.style.setProperty('--app-vh', Math.round(vv.height) + 'px');
-        root.style.setProperty(
-          '--app-vv-top', Math.max(0, Math.round(vv.offsetTop || 0)) + 'px'
-        );
-      };
-      const syncViewport = () => {
-        if (vvRaf) return;
-        vvRaf = window.requestAnimationFrame(writeViewportVars);
-      };
+        writeViewportVars();
+      });
+    };
+
+    const syncViewportNow = () => {
+      if (vvRaf) {
+        window.cancelAnimationFrame(vvRaf);
+        vvRaf = 0;
+      }
       writeViewportVars();
+    };
+
+    writeViewportVars();
+
+    if (vv) {
       vv.addEventListener('resize', syncViewport);
       vv.addEventListener('scroll', syncViewport);
     }
+
+    /* 普通 resize 也要接：部分安卓浏览器收放工具栏只触发 window.resize，
+       visualViewport 的数值会晚一拍，补一次立刻对齐。 */
+    window.addEventListener('resize', syncViewport);
+
+    /* 旋转：iOS 在 orientationchange 之后 300ms 内 vv.height 还是旧方向的
+       数值，只在事件里同步一次会拿到「横屏里塞着竖屏高度」的错误值。
+       所以立刻补一次，再在 120ms / 400ms 各补一次。 */
+    window.addEventListener('orientationchange', () => {
+      syncViewportNow();
+      window.setTimeout(syncViewportNow, 120);
+      window.setTimeout(syncViewportNow, 400);
+    });
+
+    /* 从后台切回来、或 bfcache 前进后退回来：工具栏可能已经收起，
+       可视区高度和离开时不一样了。 */
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) syncViewportNow();
+    });
+    window.addEventListener('pageshow', syncViewportNow);
 
     /* ③ 输入框聚焦后滚进可视区 */
     const isPhoneLandscape = () =>
@@ -9993,6 +10036,60 @@
       ).matches;
       if (!narrow) chatShellEl.classList.remove('is-chat-open');
     });
+
+    /* ④ 横屏工具栏提示：竖屏进游戏、转横屏后才该出现，所以两个时机都试。
+       注意 index.html 把本脚本放在 #fullscreenTip 之前，同步执行时那个节点
+       还不存在（getElementById 拿到 null 就直接 return 了），必须等 DOM 就绪。 */
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', maybeShowFullscreenTip, { once: true });
+    } else {
+      maybeShowFullscreenTip();
+    }
+    window.addEventListener('orientationchange', () => {
+      window.setTimeout(maybeShowFullscreenTip, 500);
+    });
+
+    /* 少数环境（含部分安卓 WebView、以及浏览器里的尺寸模拟）只发 resize
+       不发 orientationchange。补一条防抖，保证「竖屏进、转横屏」也放得出来。
+       函数内部第一句就是 dataset.done 短路，看过之后这些调用都是空转。 */
+    let tipResizeTimer = 0;
+    window.addEventListener('resize', () => {
+      window.clearTimeout(tipResizeTimer);
+      tipResizeTimer = window.setTimeout(maybeShowFullscreenTip, 400);
+    });
   })();
+
+  /* ---------- 横屏首次进入：告诉玩家工具栏可以滑走 ----------
+     只在「触屏 + 横屏 + 没看过」时出现一次，5 秒后自己淡出。
+     pointer-events:none，不挡任何点击；PC 端 CSS 就是 display:none，
+     连节点都不会显示。localStorage 记一笔，老玩家永远不再看到。 */
+  function maybeShowFullscreenTip() {
+    const el = document.getElementById('fullscreenTip');
+    if (!el) return;
+    if (el.dataset.done === '1') return;
+    if (!window.matchMedia('(hover: none) and (pointer: coarse)').matches) return;
+    if (!window.matchMedia('(orientation: landscape)').matches) return;
+
+    /* 登录屏还盖着就先别放：它 z-index 9000，提示在底下根本看不见，
+       5 秒的展示窗口会白白耗掉。等玩家真正进门再数。 */
+    const login = document.getElementById('login-screen');
+    if (login) {
+      const cs = window.getComputedStyle(login);
+      const booting = cs.display !== 'none' &&
+        cs.visibility !== 'hidden' &&
+        !login.classList.contains('is-hidden');
+      if (booting) return;
+    }
+
+    let seen = false;
+    try { seen = localStorage.getItem('hwu.tipShown.fullscreen') === '1'; } catch (e) {}
+    el.dataset.done = '1';
+    if (seen) return;
+
+    try { localStorage.setItem('hwu.tipShown.fullscreen', '1'); } catch (e) {}
+
+    el.classList.add('is-on');
+    window.setTimeout(() => el.classList.remove('is-on'), 5200);
+  }
 
 })();

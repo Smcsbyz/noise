@@ -7,7 +7,7 @@
 <!-- 内联空图标：省掉浏览器对 /favicon.ico 的那次 404 请求（纯噪音，不影响玩法） -->
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="css/common.css?v=20261114L">
-<link rel="stylesheet" href="css/desktop.css?v=20261116AZ">
+<link rel="stylesheet" href="css/desktop.css?v=20261116BB">
 </head>
 <body>
 
@@ -484,8 +484,16 @@
   </div>
 </div>
 
+
+<!-- ================= 横屏首次进入的工具栏提示 =================
+     只在「触屏 + 横屏 + 从没看过」时由 js 出现一次，5 秒后淡出；
+     pointer-events:none 不挡操作，PC 端 CSS 里就是 display:none。
+     文案不提“全屏”（iOS Safari 没有网页全屏），只教「往下滑」。
+     必须放在下面两个 <script> 之前：js 初始化时要 getElementById 拿到它。
+     ==================================================================== -->
+<div id="fullscreenTip" class="fullscreen-tip">向下滑动可隐藏浏览器工具栏，画面会更大</div>
 <script src="js/chat.js?v=20261114L"></script>
-<script src="js/desktop.js?v=20261116BM"></script>
+<script src="js/desktop.js?v=20261116BN"></script>
 
 <!-- ================= 竖屏提示（仅手机竖屏显示，纯 CSS 控制） =================
      手机竖屏时全屏黑底遮罩，阻止一切操作，提示玩家转成横屏。
@@ -512,6 +520,7 @@
   <div id="ending-text-container"></div>
   <button type="button" id="rewrite-btn" style="display: none;">重新撰稿</button>
 </div>
+
 
 </body>
 </html>
