@@ -1,0 +1,156 @@
+/* ============ Win95 组件库（窗口/按钮/任务栏/输入） ============ */
+* { box-sizing: border-box; margin: 0; padding: 0; }
+html, body { height: 100%; overflow: hidden; }
+body {
+  font-family: "SimSun", "宋体", serif;
+  font-size: 12px;
+  background: #008080;
+  user-select: none;
+  cursor: default;
+}
+.hidden { display: none !important; }
+
+/* ---------- 窗口 ---------- */
+.win {
+  position: absolute;
+  background: #C0C0C0;
+  border: 2px solid;
+  border-color: #FFFFFF #404040 #404040 #FFFFFF;
+  box-shadow: 1px 1px 0 #000;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+}
+.win.active .titlebar { background: #000080; }
+.win:not(.active) .titlebar { background: #808080; }
+.titlebar {
+  height: 22px;
+  display: flex;
+  align-items: center;
+  padding: 0 2px 0 4px;
+  color: #FFF;
+  font-weight: bold;
+  cursor: move;
+  flex: none;
+}
+.titlebar .t-ico { margin-right: 4px; font-size: 11px; }
+.titlebar .t-title { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.titlebar .t-btns { display: flex; gap: 2px; }
+.t-btns button {
+  width: 18px; height: 16px;
+  font: bold 10px "SimSun";
+  background: #C0C0C0;
+  border: 1px solid;
+  border-color: #FFF #404040 #404040 #FFF;
+  cursor: pointer;
+  line-height: 1;
+}
+.win-body {
+  flex: 1;
+  overflow: auto;
+  padding: 6px;
+  background: #C0C0C0;
+  position: relative;
+}
+.win.inset .win-body, .inset {
+  border: 2px solid;
+  border-color: #808080 #FFF #FFF #808080;
+  background: #FFF;
+}
+
+/* ---------- 通用按钮/输入 ---------- */
+.btn95 {
+  font: 12px "SimSun";
+  padding: 3px 12px;
+  background: #C0C0C0;
+  border: 2px solid;
+  border-color: #FFF #404040 #404040 #FFF;
+  cursor: pointer;
+  min-width: 60px;
+}
+.btn95:active, .btn95.pressed {
+  border-color: #404040 #FFF #FFF #404040;
+}
+.btn95:disabled { color: #808080; text-shadow: 1px 1px 0 #FFF; cursor: default; }
+.input95 {
+  font: 12px "SimSun";
+  padding: 3px 4px;
+  border: 2px solid;
+  border-color: #808080 #FFF #FFF #808080;
+  background: #FFF;
+  outline: none;
+}
+
+/* ---------- 任务栏 ---------- */
+#taskbar {
+  position: absolute; left: 0; right: 0; bottom: 0;
+  height: 30px;
+  background: #C0C0C0;
+  border-top: 2px solid #FFF;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  z-index: 9000;
+}
+#startBtn { font-weight: bold; }
+#taskButtons { flex: 1; display: flex; gap: 4px; overflow: hidden; }
+.task-btn {
+  font: 12px "SimSun";
+  padding: 3px 8px;
+  max-width: 160px;
+  background: #C0C0C0;
+  border: 2px solid;
+  border-color: #FFF #404040 #404040 #FFF;
+  cursor: pointer;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  position: relative;
+}
+.task-btn.active { border-color: #404040 #FFF #FFF #404040; background: #DFDFDF; font-weight: bold; }
+.task-btn .unread {
+  position: absolute; top: -4px; right: -4px;
+  width: 12px; height: 12px; border-radius: 50%;
+  background: #F00; color: #FFF; font-size: 9px;
+  line-height: 12px; text-align: center;
+  animation: blinkRed 1s steps(2) infinite;
+}
+@keyframes blinkRed { 50% { opacity: 0; } }
+#tray {
+  display: flex; align-items: center; gap: 8px;
+  padding: 2px 8px;
+  border: 2px solid;
+  border-color: #808080 #FFF #FFF #808080;
+}
+#clock { min-width: 44px; text-align: center; }
+#clock.evil { color: #F00; font-weight: bold; }
+
+/* ---------- 提示 toast ---------- */
+#toast {
+  position: absolute; right: 12px; bottom: 44px;
+  background: #FFFFE1;
+  border: 1px solid #000;
+  box-shadow: 2px 2px 0 #808080;
+  padding: 8px 12px;
+  max-width: 320px;
+  z-index: 9500;
+  font-size: 12px;
+}
+#toast .tt { font-weight: bold; margin-bottom: 4px; }
+
+/* ---------- 桌面抖动（2008 页） ---------- */
+body.shake #desktop { animation: shake2008 0.2s linear 2; }
+@keyframes shake2008 {
+  0%,100% { transform: translate(0,0); }
+  25% { transform: translate(2px,-1px); }
+  50% { transform: translate(-2px,1px); }
+  75% { transform: translate(1px,2px); }
+}
+
+/* ---------- 滚动条（复古） ---------- */
+::-webkit-scrollbar { width: 16px; height: 16px; }
+::-webkit-scrollbar-track { background: #DFDFDF; }
+::-webkit-scrollbar-thumb {
+  background: #C0C0C0;
+  border: 2px solid;
+  border-color: #FFF #404040 #404040 #FFF;
+}

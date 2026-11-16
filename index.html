@@ -1,0 +1,527 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>调查终端 v1.0</title>
+<!-- 内联空图标：省掉浏览器对 /favicon.ico 的那次 404 请求（纯噪音，不影响玩法） -->
+<link rel="icon" href="data:,">
+<link rel="stylesheet" href="css/common.css?v=20261114L">
+<link rel="stylesheet" href="css/desktop.css?v=20261116AY">
+</head>
+<body>
+
+<!-- ================= 开机登录屏 =================
+     必须直接挂在 <body> 下、放在 #layout 之前：
+     塞进 #layout 里会被它的 flex 布局和 overflow:hidden 裁掉。
+     显隐由 localStorage 的 hwu.loggedIn 决定，定稿在 js/desktop.js 的
+     initLogin() 里。默认带 .is-hidden（老玩家不该闪一下登录页），
+     新玩家的「立刻可见」由紧跟其后的那段内联脚本负责。
+     z-index 见 css/desktop.css：高过主视窗与所有常驻浮层。
+     ============================================== -->
+<div id="login-screen" class="is-hidden">
+  <div class="login-box">
+    <p class="login-kicker">RESTRICTED ACCESS</p>
+    <h1 class="login-title">员工终端</h1>
+
+    <!-- 密码提示：紧跟标题、在输入框之上。
+         原来是「标题 / 副标题 / 输入框 / 提示 / 按钮」五段，
+         提示被夹在输入框和按钮中间，读起来像一句孤立的说明；
+         现在收成「是什么 → 怎么填 → 填 → 进」四步。 -->
+    <p class="login-hint">密码提示：新闻三要素</p>
+
+    <div class="login-field">
+      <input id="login-pass" type="password" autocomplete="off" spellcheck="false"
+             placeholder="仅识别英文字符，无需输入空格" aria-label="访问口令">
+    </div>
+
+    <!-- 错误提示紧贴输入框下方；默认 .hidden（display:none），
+         不占位，所以常态下「输入框 → 按钮」仍是一段自然间距。 -->
+    <p id="login-error" class="login-error hidden">口令不正确，请重试。</p>
+
+    <button id="login-btn" type="button">进 入</button>
+  </div>
+</div>
+
+<!-- ================= 首帧分流（紧贴登录屏，越早越好） =================
+     这段脚本必须夹在 #login-screen 与 #layout 之间、并且是内联的：
+     js/desktop.js 有九千多行，从它开始下载到 initLogin() 执行完，
+     浏览器早就画完第一帧了 —— 那时如果「谁该出现」还没定下来，
+     就会出现「主界面闪一秒、再被登录屏盖住」的闪烁。
+
+     所以在这里、登录屏刚被解析出来的一瞬间，先把这一帧定死：
+       · 老玩家（hwu.loggedIn === 'true'）→ 登录屏立即 display:none，
+         连 0.8s 的渐隐都不跑；#layout 由 js 一跑起来就放开，
+         实测第一帧就已经是主界面，中间不会出现登录页；
+       · 新玩家 → 立刻摘掉 .is-hidden，第一帧就是完整的深蓝登录界面，
+         背景里不会有聊天页、紫色导航条之类的东西漏出来。
+     #layout 自带 inline display:none（见下一个块），两种情况下都不会
+     提前露头；最终以 initLogin() 的判断为准（它会再写一次，幂等）。
+
+     try / catch 包住 localStorage：某些隐私模式下读它会抛异常，
+     真抛了就当「未登录」处理，至少不会把整页脚本卡死。
+     ================================================================== -->
+<script>
+(function () {
+  var gate = document.getElementById('login-screen');
+  if (!gate) return;
+  var logged = false;
+  try { logged = localStorage.getItem('hwu.loggedIn') === 'true'; } catch (e) {}
+  if (logged) {
+    gate.style.display = 'none';          /* 老玩家：这一帧就不要它 */
+  } else {
+    gate.classList.remove('is-hidden');   /* 新玩家：这一帧就是它 */
+  }
+})();
+</script>
+
+<!-- ================= 桌面背景的光晕层（纯装饰，不吃点击） =================
+     铺满全屏、pointer-events: none、z-index 1，永远待在 #layout（z-index 10）下面。
+     鼠标移动时由 js 写入 --mouse-x / --mouse-y，光晕跟着光标走。
+     ==================================================================== -->
+<div id="bg-glow" aria-hidden="true"></div>
+
+<!-- ================= 主体布局（悬浮的应用窗口） =================
+     默认 display:none —— 防的就是上面说的那个闪烁：
+     以前这里没有内联样式，#layout 在第一帧就带着聊天页、左侧紫色导航
+     画了出来，等 js 跑完才被登录屏盖住。现在它一开始就不参与渲染，
+     由 js/desktop.js 在「确认已登录 / 密码验证通过」时改回 flex。
+     display 只有这一处声明，媒体查询里也没有覆盖它，
+     所以 inline 的 flex 不会和任何响应式规则打架。
+     ============================================================ -->
+<div id="layout" style="display: none;">
+
+  <!-- ---------- 最左侧图标导航条（深紫，70px） ---------- -->
+  <nav id="rail">
+    <!-- 图标由 js/desktop.js 的 renderSidebar() 按安装状态渲染：
+         未安装 → 4 个（聊天 / 浏览器 / 邮件 / 资料库）
+         已安装 → 6 个（多出 写稿 / 时光机） -->
+    <div class="rail-center" id="railCenter"></div>
+
+    <!-- 底部安装状态徽标（原顶栏徽标迁移至此） -->
+    <div class="rail-foot">
+      <span id="pluginBadge" class="rail-badge hidden" title="LinkWriter v1.0 已安装">LW</span>
+    </div>
+  </nav>
+
+  <!-- ---------- 右侧主内容区 ---------- -->
+  <main id="main">
+
+    <!-- 实时通讯（三栏：导航条 + 联系人 + 聊天区） -->
+    <section class="view active" id="view-chat">
+      <div class="chat-shell">
+        <aside class="chat-contacts">
+          <div class="contacts-head">
+            <h2>Chats</h2>
+            <div class="contacts-search">
+              <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><line x1="20" y1="20" x2="16.2" y2="16.2"/></svg>
+              <input type="text" id="contactSearch" placeholder="搜索联系人">
+            </div>
+          </div>
+          <!-- 联系人列表由 js/desktop.js 的 CONTACTS 数组渲染 -->
+          <div class="contact-list" id="contactList"></div>
+        </aside>
+
+        <div class="chat-main">
+          <header class="chat-head">
+            <!-- 手机横屏窄宽度下才出现：从会话返回联系人列表 -->
+            <button class="chat-back" id="chatBack" type="button" aria-label="返回联系人列表">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><polyline points="15 5 8 12 15 19"/></svg>
+            </button>
+            <span class="avatar" id="chatHeadAvatar">老</span>
+            <div class="chat-head-info">
+              <b id="chatTitle">老板</b>
+              <small><span class="chat-status-dot"></span>在线</small>
+            </div>
+          </header>
+          <div class="chat-log" id="chatLog"><!-- 由 js/desktop.js 渲染 --></div>
+
+          <!-- 轮到玩家说话时，这一条大按钮顶掉下面的输入框 -->
+          <div class="chat-gate" id="chatGate" hidden>
+            <button type="button" class="chat-gate-btn" id="chatGateBtn"></button>
+          </div>
+
+          <!-- 输入框只是聊天框的“占位”：本作玩家只能点按钮发言，故常年禁用 -->
+          <div class="chat-input" id="chatComposer">
+            <input type="text" id="chatInput" placeholder="输入消息…" disabled>
+            <button id="chatSend" type="button" disabled>发送</button>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 收件箱（独立邮件客户端：导航条 + 邮件目录 + 阅读区） -->
+    <section class="view" id="view-mail">
+      <div class="mail-shell">
+
+        <!-- ---------- 中间栏：发邮件 / 收件箱 / 查看附件 ---------- -->
+        <aside class="mail-side">
+          <div class="mail-side-head">
+            <h2>Mail</h2>
+            <p>reporter@linkwriter.mail</p>
+          </div>
+          <nav class="mail-nav" id="mailNav">
+            <button class="mail-nav-item active" data-mail-view="compose" type="button">
+              <svg class="mn-ico" viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="2.5"/><polyline points="3 7 12 13.5 21 7"/></svg>
+              <span class="mn-label">发邮件</span>
+            </button>
+            <button class="mail-nav-item" data-mail-view="inbox" type="button">
+              <svg class="mn-ico" viewBox="0 0 24 24"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>
+              <span class="mn-label">收件箱</span>
+              <span class="mail-dot hidden" id="mailDot" aria-label="有新邮件"></span>
+            </button>
+            <button class="mail-nav-item" data-mail-view="attach" type="button">
+              <svg class="mn-ico" viewBox="0 0 24 24"><path d="M21.44 11.05 12.25 20.24a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
+              <span class="mn-label">查看附件</span>
+              <span class="mail-dot hidden" id="mailAttachDot" aria-label="有新附件"></span>
+            </button>
+          </nav>
+        </aside>
+
+        <!-- ---------- 右侧主区域：三个子页面 ---------- -->
+        <div class="mail-main">
+
+          <!-- ① 发邮件 -->
+          <section class="mail-pane active" id="mail-pane-compose">
+            <header class="mail-pane-head">
+              <h3>写邮件</h3>
+              <span class="mail-from">发件人：撰稿人 &lt;reporter@linkwriter.mail&gt;</span>
+            </header>
+            <form class="mail-form" id="mailForm" autocomplete="off">
+              <label class="mail-field">
+                <span>收件人</span>
+                <input type="text" id="mail-to" placeholder="name@mail.com">
+              </label>
+              <label class="mail-field">
+                <span>主题</span>
+                <input type="text" id="mail-subject" placeholder="（无主题）">
+              </label>
+              <label class="mail-field mail-field-body">
+                <span>正文</span>
+                <textarea id="mail-body" placeholder="写下你想问的问题…"></textarea>
+              </label>
+              <div class="mail-foot">
+                <span class="mail-hint" id="mailHint"></span>
+                <button type="submit" class="mail-send" id="mail-send-btn">发送</button>
+              </div>
+            </form>
+          </section>
+
+          <!-- ② 收件箱：列表 + 阅读区 -->
+          <section class="mail-pane" id="mail-pane-inbox">
+            <div class="mail-inbox">
+              <div class="mail-list" id="mailList"><!-- 由 js/desktop.js 渲染 --></div>
+              <div class="mail-reader" id="mailReader"><!-- 由 js/desktop.js 渲染 --></div>
+            </div>
+          </section>
+
+          <!-- ③ 查看附件：纵向单列，点附件就地把预览插到那张卡片正下方（手风琴）
+               列表里没有预埋任何预览块，.attach-drawer 由 js 现场创建并插入。 -->
+          <section class="mail-pane" id="mail-pane-attach">
+            <header class="mail-pane-head">
+              <h3>附件</h3>
+              <span class="mail-from">来自往来的信件</span>
+            </header>
+            <div class="mail-attach-scroll">
+              <!-- 附件列表：卡片 + 就地展开的预览块（无固定抽屉容器） -->
+              <div class="mail-attach-body" id="mailAttachBody"><!-- 由 js/desktop.js 渲染 --></div>
+            </div>
+          </section>
+
+          <!-- ④ 旧的全屏附件预览页：已停用，js 不再往这里渲染。
+               保留空壳是为了兼容存档/旧链接里可能残留的 mail-pane-video 引用。 -->
+          <section class="mail-pane" id="mail-pane-video">
+            <div class="mail-video-body" id="mailVideoBody"></div>
+          </section>
+
+          <div class="mail-toast hidden" id="mailToast">邮件发送中...</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 资讯浏览器 -->
+    <section class="view" id="view-browser">
+      <div class="module browser-module">
+        <div class="browser-bar">
+          <button class="bar-home" id="browserHomeBtn" type="button" title="返回首页" aria-label="返回首页">
+            <svg viewBox="0 0 24 24"><path d="M3 10.4 12 3l9 7.4"/><path d="M5.6 9.4V20h12.8V9.4"/><path d="M9.8 20v-5.4h4.4V20"/></svg>
+          </button>
+          <div class="addr-wrap">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            <input type="text" id="browser-search-input" placeholder="搜索资讯或关键词…">
+          </div>
+          <button class="accent-btn" id="browser-search-btn">搜索</button>
+        </div>
+        <div class="browser-content" id="browser-content-area">
+          <p class="placeholder">输入关键词，调查全网资讯...</p>
+        </div>
+
+        <!-- LinkWriter 自动翻译提示：绝对定位在浏览器窗口内部，顶部居中 -->
+        <div id="translateTip" class="translate-tip hidden" role="status" aria-live="polite">
+          <span class="tt-globe" aria-hidden="true">🌐</span>
+          <p class="tt-text"><b>LinkWriter</b>：检测到外文网页，自动翻译已启动。</p>
+          <button class="tt-ok" id="translateTipOk" type="button">知道了</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- 写稿器（极简文本编辑器，需插件） -->
+    <section class="view" id="view-write">
+      <div class="module write-module">
+
+        <!-- ===== 舞台：左侧竖排圆形切稿按钮 + 中间 A4 纸 ===== -->
+        <div class="write-stage">
+
+          <!-- 三篇稿件的切换：1 已解锁 / 2·3 未写到时置灰带锁
+               放在纸外的左侧空白处，竖排圆形，位置由 .write-stage 决定 -->
+          <div class="w-draft-tabs" id="wDraftTabs" role="tablist"
+               aria-orientation="vertical" aria-label="稿件切换">
+            <button type="button" class="w-draft-tab is-active" data-draft="1" role="tab"
+                    aria-selected="true" title="第 1 篇">
+              <span class="w-tab-num">1</span>
+              <span class="w-tab-lock" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="11.2" width="14" height="9" rx="2.2"/><path d="M8.2 11.2V8a3.8 3.8 0 0 1 7.6 0v3.2"/></svg></span>
+            </button>
+            <button type="button" class="w-draft-tab is-locked" data-draft="2" role="tab"
+                    aria-selected="false" aria-disabled="true" disabled title="第 2 篇未解锁">
+              <span class="w-tab-num">2</span>
+              <span class="w-tab-lock" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="11.2" width="14" height="9" rx="2.2"/><path d="M8.2 11.2V8a3.8 3.8 0 0 1 7.6 0v3.2"/></svg></span>
+            </button>
+            <button type="button" class="w-draft-tab is-locked" data-draft="3" role="tab"
+                    aria-selected="false" aria-disabled="true" disabled title="第 3 篇未解锁">
+              <span class="w-tab-num">3</span>
+              <span class="w-tab-lock" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="5" y="11.2" width="14" height="9" rx="2.2"/><path d="M8.2 11.2V8a3.8 3.8 0 0 1 7.6 0v3.2"/></svg></span>
+            </button>
+          </div>
+
+          <!-- ===== A4 纸：工具栏 + 上（正文）/ 中（关键词）/ 下（提交） ===== -->
+          <div class="write-canvas">
+
+            <header class="write-topbar">
+              <div class="write-doc-name" id="wDocName">《某顶流男星疑似夜会神秘女子？》 <span>- LinkWriter</span></div>
+              <div class="write-tools">
+                <button class="write-tool" title="撤销">↶</button>
+                <button class="write-tool" title="重做">↷</button>
+                <span class="write-divider"></span>
+                <button class="write-tool strong" title="加粗">B</button>
+                <button class="write-tool italic" title="斜体">I</button>
+                <button class="write-tool underline" title="下划线">U</button>
+              </div>
+              <span class="write-status" id="writeStatus">草稿</span>
+            </header>
+
+            <article class="doc-page">
+
+              <!-- 上：正文区 -->
+              <div class="doc-top">
+
+                <h1 class="w-title" id="wTitle">《某顶流男星疑似夜会神秘女子？》</h1>
+                <!-- 动态副标题：按已填词汇的正负分实时改写，文案见 js 里的 DRAFTS[].subtitle -->
+                <p class="w-subtitle" id="dynamic-subtitle" data-tone="mid"></p>
+                <p class="w-meta">撰稿人：你 · 状态：草稿 · 已填 <b id="wCount">0</b>/<span id="wTotal">2</span></p>
+
+                <!-- 正文由 js/desktop.js 按 currentDraft 渲染 -->
+                <div class="doc-body" id="docBody"></div>
+              </div>
+
+              <!-- 中：关键词区 -->
+              <div class="w-materials">
+                <div class="w-mat-head">
+                  <h3>调查结果</h3>
+                </div>
+                <div class="w-mat-list" id="clueList"><!-- 由 js/desktop.js 差量渲染 --></div>
+              </div>
+
+              <!-- 下：提交区 -->
+              <div class="w-foot">
+                <span class="w-warn" id="npWarn"></span>
+                <button type="button" class="w-submit" id="npSubmit">提交稿件</button>
+              </div>
+
+            </article>
+          </div>
+          <!-- /A4 纸 -->
+
+        </div>
+        <!-- /舞台 -->
+
+      </div>
+    </section>
+
+    <!-- 时光机：Internet Archive 三视图 -->
+    <section class="view" id="view-wayback">
+      <div class="module wayback-module">
+
+        <!-- ========== 视图 1：Archive 首页（默认显示） ========== -->
+        <div class="wbm-view active" id="wayback-view-home">
+          <!-- 上半 65%：黑底功能区（导航 + 标题 + 搜索） -->
+          <div class="wbm-top">
+            <header class="wbm-nav">
+              <div class="wbm-logo">互联网档案馆</div>
+              <nav class="wbm-nav-icons">
+                <svg viewBox="0 0 24 24" title="图书"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5z"/><path d="M4 19.5A2.5 2.5 0 0 0 6.5 22H20v-5"/></svg>
+                <svg viewBox="0 0 24 24" title="影像"><rect x="2" y="5" width="20" height="14" rx="2"/><line x1="7" y1="5" x2="7" y2="19"/><line x1="17" y1="5" x2="17" y2="19"/></svg>
+                <svg viewBox="0 0 24 24" title="音频"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="18" cy="16" r="3"/></svg>
+                <svg viewBox="0 0 24 24" title="软件"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg>
+                <svg viewBox="0 0 24 24" title="图片"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+              </nav>
+              <div class="wbm-nav-right">
+                <span>注册</span><span>/</span><span>登录</span>
+              </div>
+            </header>
+
+            <div class="wbm-hero">
+              <h1 class="wbm-brand">网页时光机</h1>
+              <div class="wbm-hero-search">
+                <input type="text" id="wbInput" placeholder="输入网址或关键词" autocomplete="off" spellcheck="false">
+                <button id="wbSearchBtn" type="button">搜索</button>
+              </div>
+              <p class="wbm-search-msg" id="wbSearchMsg"></p>
+            </div>
+          </div>
+
+          <!-- 下半 35%：白底三列（图标 / 简介 / 四项数据） -->
+          <div class="wbm-white">
+            <div class="wbm-cols">
+              <div class="wbm-col wbm-col-left">
+                <svg viewBox="0 0 24 24"><path d="M3 21h18"/><path d="M5 21V7l7-4 7 4v14"/><line x1="9" y1="10" x2="9" y2="21"/><line x1="15" y1="10" x2="15" y2="21"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+                <p>庆祝 1 万亿个网页被归档！</p>
+              </div>
+
+              <div class="wbm-col wbm-col-mid">
+                <p class="wbm-intro">网页时光机是互联网档案馆发起的一项非营利性计划，致力于构建互联网网站及其他文化作品的数字图书馆，为研究人员、历史学家、学者和公众提供免费访问。</p>
+              </div>
+
+              <div class="wbm-col wbm-col-right">
+                <ul class="wbm-stats">
+                  <li><svg viewBox="0 0 24 24"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V2H6.5A2.5 2.5 0 0 0 4 4.5z"/></svg>9100 亿文本</li>
+                  <li><svg viewBox="0 0 24 24"><rect x="2" y="5" width="20" height="14" rx="2"/></svg>2200 万电影</li>
+                  <li><svg viewBox="0 0 24 24"><path d="M9 18V5l12-2v13"/><circle cx="6" cy="18" r="3"/></svg>800 万音频</li>
+                  <li><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><line x1="3" y1="9" x2="21" y2="9"/></svg>1400 万软件</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- ========== 视图 2：快照页（默认隐藏） ========== -->
+        <div class="wbm-view" id="wayback-view-snapshot">
+          <div class="wbm-retro-bar">
+            <span>你正在查看 <b id="wbSnapDate">2001 年 9 月 3 日</b> 的历史快照。</span>
+            <button id="wbBackBtn">← 返回首页</button>
+          </div>
+          <div class="wbm-snapshot-body">
+            <div class="wayback-screen snap-2001" id="wbSnapshotContent">
+              <!-- 快照正文由 js/desktop.js 按年份渲染 -->
+            </div>
+          </div>
+        </div>
+
+      </div>
+    </section>
+
+    <!-- 资料库（收藏夹） -->
+    <section class="view" id="view-library">
+      <div class="library-shell">
+        <header class="library-head">
+          <h1>我的收藏夹</h1>
+          <p id="libraryCount"></p>
+        </header>
+        <div class="library-body">
+          <div class="library-grid" id="libraryGrid"><!-- 由 js/desktop.js 渲染 --></div>
+          <div class="library-empty hidden" id="libraryEmpty">
+            <svg viewBox="0 0 24 24"><polygon points="12 3.2 14.7 8.9 20.8 9.8 16.4 14.2 17.5 20.4 12 17.4 6.5 20.4 7.6 14.2 3.2 9.8 9.3 8.9"/></svg>
+            <p>暂无收藏，在调查时点击右上角星标即可收藏关键网页。</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+  </main>
+</div>
+
+<!-- ================= 悬浮音乐播放器（主视窗之外，固定在左下角） =================
+     单击：播放 / 暂停；双击：切换下一首（JS 里做 250ms 防抖）。
+     曲目：assets/audio/bgm1.mp3 / bgm2.mp3 / bgm3.mp3，由 js 按序轮换。
+     <audio> 放在这里而不是动态创建：刷新时一落地就有节点可抓，
+     src 仍由 js 写入，避免 HTML 与 JS 各存一份「当前曲目」的状态。
+     这里【不写】loop：原生循环会在最后一个采样点硬切回开头，
+     循环改由 js 用 timeupdate 渐出 + ended 渐入接管。
+     ==================================================================== -->
+<audio id="bgm-player" preload="auto"></audio>
+
+<!-- 真结局专属配乐：独立第二路音轨，和上面那颗 bgm-player 完全无关。
+     为什么不塞进 BGM_TRACKS 里当第四首：
+       · 那套要参与曲目轮换、淡出渐入、崩坏慢放、诡异态音量，
+         而这首只在真结局里响一次，跟着演出走；
+       · 玩家按左下角的音乐键不该把它停掉，它也不是「背景音乐」，
+         是这一幕的声部。
+     loop 直接写在标签上：它是氛围垫底，原生循环足够，
+     不需要 JS 在曲尾做渐出渐入（那是给正片换曲用的）。
+     src 写死在这里而不是由 js 写入：只有一首，没有「当前曲目」的状态要同步。
+     文件缺失时 play() 会 reject，js 里只警告一句，不影响演出。 -->
+<audio id="true-ending-audio" loop preload="auto" src="assets/audio/true-ending.mp3"></audio>
+<div id="bgmDock" class="bgm-dock">
+  <button id="bgmToggle" class="bgm-btn" type="button"
+          aria-label="背景音乐：播放"
+          title="单击播放 / 暂停 · 双击切换曲目">
+    <span class="bgm-icon" aria-hidden="true">🎵</span>
+  </button>
+</div>
+
+<!-- ================= 开发测试面板（仅调试用，可整块删除） =================
+     移除方式：删掉下面这个 <aside> 整块 + css/desktop.css 末尾
+     「开发测试面板」一节 + js/desktop.js 第十节。
+     按钮不写死在这里，统一由 DEV_TESTS 数组渲染。
+     ==================================================================== -->
+<aside id="devPanel" class="dev-panel" aria-label="界面预览测试面板">
+  <div class="dev-panel-head">UI TEST</div>
+  <div class="dev-panel-list" id="devPanelList"><!-- 由 js/desktop.js 渲染 --></div>
+</aside>
+
+<!-- ================= 结局 / 提示弹窗 ================= -->
+<div id="modal" class="modal hidden">
+  <div class="modal-card">
+    <h3 id="modalTitle"></h3>
+    <p id="modalText"></p>
+    <button class="accent-btn" id="modalClose">好的</button>
+  </div>
+</div>
+
+<!-- ================= 插件安装蓝屏（文字由 js 逐字打出） ================= -->
+<div id="bsod" class="bsod hidden" role="alert" aria-label="LinkWriter 正在安装">
+  <div class="bsod-inner">
+    <div id="blue-screen-text"></div>
+  </div>
+</div>
+
+<script src="js/chat.js?v=20261114L"></script>
+<script src="js/desktop.js?v=20261116BL"></script>
+
+<!-- ================= 竖屏提示（仅手机竖屏显示，纯 CSS 控制） =================
+     手机竖屏时全屏黑底遮罩，阻止一切操作，提示玩家转成横屏。
+     不参与游戏逻辑，删掉不影响任何功能。
+     ==================================================================== -->
+<div class="rotate-hint" id="rotateHint" role="alert" aria-label="请将手机横屏">
+  <div class="rotate-hint-inner">
+    <svg class="rotate-hint-icon" viewBox="0 0 64 64" aria-hidden="true">
+      <rect x="20" y="8" width="24" height="42" rx="4"/>
+      <line x1="28" y1="45" x2="36" y2="45"/>
+      <path d="M12 46a20 20 0 0 0 12 10"/>
+      <polyline points="12 40 12 46 18 46"/>
+    </svg>
+    <p class="rotate-hint-title">请将手机横屏以获得最佳调查体验</p>
+    <p class="rotate-hint-sub">横屏后界面会自动铺满屏幕</p>
+  </div>
+</div>
+
+<!-- ================= 结局演出层（默认隐藏，提交第 3 篇后由 js 打开） =================
+     文字逐行浮现 → 结局标签 → 亮起「重新撰稿」。
+     「重新撰稿」由 js 控制 display（初始 none），撤回第 3 篇回到写稿器。
+     ==================================================================== -->
+<div id="ending-overlay" aria-hidden="true">
+  <div id="ending-text-container"></div>
+  <button type="button" id="rewrite-btn" style="display: none;">重新撰稿</button>
+</div>
+
+</body>
+</html>

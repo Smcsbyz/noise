@@ -1,0 +1,196 @@
+/* ============ 站点年代皮肤与页面样式（占位阶段通用版） ============ */
+.site { padding: 8px; line-height: 1.8; user-select: text; }
+.site a { cursor: pointer; }
+.site a:link { color: #0000EE; }
+.site a.visited { color: #551A8B; }
+.site .footer { margin-top: 24px; color: #888; font-size: 11px; }
+
+/* ---------- 1998 / 2003：Web1.0 ---------- */
+.site.y1998, .site.y2003 {
+  background: #FFF; color: #000;
+  font-family: "Times New Roman", "SimSun", serif;
+  font-size: 14px;
+}
+.site.y1998 table, .site.y2003 table {
+  border-collapse: collapse; margin: 8px 0;
+}
+.site.y1998 td, .site.y2003 td {
+  border: 1px solid #888; padding: 4px 10px; font-size: 13px;
+}
+.site.y1998 .counter, .site.y2003 .counter { color: #555; font-size: 12px; }
+.site.y2003 .stopped { color: #C00; font-weight: bold; }
+.site .redact { background: #000; color: #000; padding: 0 2px; }
+.site .redact::selection { background: #000; color: #FFF; }
+
+/* ---------- 2008：乱码期 ---------- */
+.site.y2008 {
+  background: #000; color: #F00;
+  font-family: "Comic Sans MS", "SimHei", cursive;
+  transform: none;
+}
+.site.y2008 a { color: #F80; }
+.site.y2008 .glitch { display: inline-block; animation: glitchJit 2s infinite; }
+.site.y2008 .censored { background: #F00; color: #F00; }
+.site.y2008 .broken-img {
+  display: inline-block; width: 120px; height: 60px;
+  border: 1px solid #F44; color: #F44;
+  text-align: center; line-height: 60px; font-size: 11px;
+  margin: 4px;
+}
+@keyframes glitchJit {
+  0%,92%,100% { transform: none; }
+  94% { transform: translateX(2px); }
+  96% { transform: translateX(-3px); }
+  98% { transform: translateX(1px); }
+}
+
+/* ---------- 2015：扁平卡片 ---------- */
+.site.y2015 {
+  background: #EEF2F5; color: #333;
+  font-family: "Microsoft YaHei", sans-serif;
+}
+.site.y2015 .card {
+  background: #FFF; border-radius: 4px;
+  padding: 12px; margin: 8px 0;
+  box-shadow: 0 1px 2px rgba(0,0,0,.1);
+}
+.site.y2015 .ad {
+  border: 1px dashed #AAA; color: #999;
+  text-align: center; padding: 8px; margin: 8px 0; font-size: 12px;
+}
+.site.y2015 .deleted-note {
+  background: #FDECEC; border-left: 3px solid #D33;
+  padding: 8px 12px; margin: 10px 0; font-size: 13px;
+}
+.site.y2015 .highlight-name { color: #C00; font-weight: bold; }
+
+/* ---------- 2019 / 404 ---------- */
+.site.y404 {
+  background: #FFF; color: #666;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  min-height: 260px; text-align: center;
+}
+
+/* ---------- 新闻站 ---------- */
+.news-portal { display: flex; gap: 12px; }
+.news-portal .side { width: 140px; flex: none; }
+.news-portal .side a { display: block; margin: 4px 0; }
+.news-portal .main { flex: 1; }
+.news-portal .hot { width: 150px; flex: none; font-size: 12px; }
+.article h2 { margin: 6px 0 12px; line-height: 1.5; }
+.article .meta { color: #777; font-size: 12px; margin-bottom: 14px; }
+.article p { margin: 10px 0; }
+
+/* ---------- 论坛 ---------- */
+.forum .thread-head { border-bottom: 2px solid #C00; padding-bottom: 6px; margin-bottom: 10px; }
+.forum .floor {
+  border: 1px solid #CCC; margin: 10px 0; padding: 8px;
+  background: #FAFAFA;
+}
+.forum .floor .f-meta { color: #888; font-size: 11px; margin-bottom: 6px; }
+.forum .floor .f-meta b { color: #335599; }
+.forum .floor.edited-late .f-meta .edit-time { color: #C00; }
+.kw-inline {
+  border-bottom: 1px dashed #C60;
+  cursor: pointer;
+  background: #FFF8E8;
+  padding: 0 2px;
+}
+.kw-inline.collected { background: #E8F0E8; color: #557; border-bottom-color: #557; }
+.collect-btn {
+  font-size: 11px;
+  background: #335599; color: #FFF;
+  border: none; padding: 1px 6px;
+  cursor: pointer; margin-left: 6px;
+}
+.collect-btn.done { background: #999; }
+
+/* ---------- 搜索 ---------- */
+.search-home { text-align: center; padding-top: 60px; }
+.search-home input { width: 360px; }
+.search-home .logo { font-size: 28px; font-weight: bold; margin-bottom: 18px; color: #2244AA; }
+.search-results { max-width: 560px; }
+.search-results .r { margin: 14px 0; }
+.search-results .r .r-t { font-size: 14px; }
+.search-results .r .r-u { color: #080; font-size: 11px; }
+.search-results .r .r-s { color: #444; font-size: 12px; }
+.search-results .none { color: #888; margin-top: 16px; }
+.search-results .didyou { color: #C00; margin-top: 8px; }
+
+/* ---------- 视频 ---------- */
+.video-stub {
+  background: #000; color: #EEE;
+  padding: 14px; text-align: center;
+}
+.video-stub .title { font-size: 14px; margin-bottom: 10px; }
+.video-stub .screen {
+  height: 140px; background: #1A1A1A;
+  border: 1px solid #444; margin-bottom: 10px;
+  display: flex; align-items: center; justify-content: center;
+  color: #666; font-size: 12px;
+}
+
+/* ---------- 时光机 ---------- */
+.wb-head {
+  background: #FFFFE1;
+  border: 1px solid #999;
+  padding: 6px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+  user-select: none;
+}
+.wb-years { margin-bottom: 8px; user-select: none; }
+.wb-years button { margin-right: 4px; }
+.wb-years button.cur { font-weight: bold; background: #DFDFDF; border-color: #404040 #FFF #FFF #404040; }
+
+/* ---------- 聊天 ---------- */
+.chat-wrap { display: flex; height: 100%; gap: 6px; }
+.chat-list {
+  width: 110px; flex: none;
+  border: 2px solid; border-color: #808080 #FFF #FFF #808080;
+  background: #FFF; padding: 4px;
+}
+.chat-list .contact {
+  padding: 4px 6px; margin-bottom: 2px;
+  cursor: pointer; display: flex; align-items: center; gap: 5px;
+}
+.chat-list .contact.cur { background: #000080; color: #FFF; }
+.chat-list .dot { width: 8px; height: 8px; border-radius: 50%; background: #0C0; flex: none; }
+.chat-list .dot.off { background: #AAA; }
+.chat-main { flex: 1; display: flex; flex-direction: column; }
+.chat-msgs {
+  flex: 1; overflow-y: auto;
+  border: 2px solid; border-color: #808080 #FFF #FFF #808080;
+  background: #FFF; padding: 8px;
+  user-select: text;
+}
+.chat-msg { margin-bottom: 8px; }
+.chat-msg .who { font-weight: bold; color: #335599; font-size: 11px; }
+.chat-msg.me .who { color: #770; }
+.chat-msg .txt { background: #F4F4F4; padding: 4px 8px; margin-top: 2px; display: inline-block; max-width: 92%; }
+.chat-msg.me .txt { background: #FFFFD8; }
+.chat-replies { padding-top: 6px; display: flex; flex-wrap: wrap; gap: 4px; }
+.chat-replies .btn95 { min-width: 0; padding: 2px 8px; font-size: 11px; }
+.chat-note { color: #888; font-size: 11px; padding-top: 4px; }
+
+/* ---------- 记事本 ---------- */
+.np-head { margin-bottom: 8px; }
+.np-head input.title95 {
+  width: 100%; font: bold 13px "SimSun"; padding: 4px;
+  border: 2px solid; border-color: #808080 #FFF #FFF #808080;
+}
+.np-slots { margin: 8px 0; }
+.np-slots .slot { margin-right: 6px; margin-bottom: 6px; }
+.np-ninth { margin: 12px 0; padding: 8px; border: 1px dashed #888; }
+.np-ninth .hint { color: #888; }
+.np-preview {
+  border: 2px solid; border-color: #808080 #FFF #FFF #808080;
+  background: #FFF; padding: 10px; min-height: 70px;
+  font-size: 13px; line-height: 1.8;
+  user-select: text;
+}
+.np-tray { margin-top: 10px; }
+.np-tray .tray-title { font-weight: bold; margin-bottom: 4px; }
+.np-actions { margin-top: 10px; display: flex; gap: 8px; align-items: center; }
+.np-actions .warn { color: #C00; }

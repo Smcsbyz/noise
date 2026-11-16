@@ -1,0 +1,99 @@
+/* ============================================================
+   common.css —— 设计变量 / 基础重置 / 通用组件
+   主题：现代 · 极简 · 扁平化 · 深色
+   ============================================================ */
+
+:root {
+  --bg:        #121212;   /* 页面背景 */
+  --panel:     #1e1e1e;   /* 面板背景 */
+  --panel-2:   #252525;   /* 面板内层次（输入框、条目悬停） */
+  --line:      #2e2e2e;   /* 分隔线 */
+  --text:      #e0e0e0;   /* 主文字 */
+  --text-dim:  #9a9a9a;   /* 次要文字 */
+  --text-faint:#6a6a6a;   /* 占位文字 */
+  --accent:    #5e3fbe;   /* 强调色（品牌紫） */
+  --accent-hover:#6f4dd4;
+  --radius:    10px;
+  --transition: 0.22s ease;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body { height: 100%; }
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: "PingFang SC", "Microsoft YaHei", "Segoe UI", sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+button {
+  font-family: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+input, textarea {
+  font-family: inherit;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  outline: none;
+  transition: border-color var(--transition), background var(--transition);
+}
+input:focus, textarea:focus {
+  border-color: var(--accent);
+  background: #2a2a2a;
+}
+input::placeholder, textarea::placeholder { color: var(--text-faint); }
+
+/* ---------- 滚动条（现代细条） ---------- */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: #3a3a3a;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover { background: #4a4a4a; }
+
+/* ---------- 通用面板标题 ---------- */
+.panel-title {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-dim);
+  text-transform: uppercase;
+  padding: 14px 16px 10px;
+  flex: none;
+}
+
+/* ---------- 占位提示 ---------- */
+.placeholder {
+  color: var(--text-faint);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 160px;
+}
+
+/* ---------- 通用显隐 ---------- */
+.hidden { display: none !important; }
+
+/* ---------- 强调按钮 ---------- */
+.accent-btn {
+  background: var(--accent);
+  color: #fff;
+  border-radius: var(--radius);
+  padding: 9px 20px;
+  font-weight: 600;
+  transition: background var(--transition), transform 0.1s;
+}
+.accent-btn:hover { background: var(--accent-hover); }
+.accent-btn:active { transform: scale(0.97); }
