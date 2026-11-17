@@ -2327,6 +2327,7 @@
          preload="metadata"：先只取时长和首帧，别一插进来就整段下载 */
       html = '<div class="attach-media-wrap">' +
           '<video controls playsinline webkit-playsinline preload="metadata"' +
+            ' poster="assets/image/poster-default.jpg"' +
             (src ? ' src="' + escapeHtml(src) + '"' : '') + '></video>' +
         '</div>';
     } else {
@@ -3955,6 +3956,7 @@
           '<div class="bili-player">' +
             '<div class="bili-stage">' +
               '<video class="bili-video" src="assets/video/hwu_opening.mp4"' +
+                ' poster="assets/image/poster-default.jpg"' +
                 ' controls playsinline webkit-playsinline preload="metadata"></video>' +
             '</div>' +
           '</div>' +
@@ -4661,6 +4663,7 @@
              内联只留宽高与底色，避免内联 margin 把外部的间距规则压掉。 */
           '<div class="video-oprah-wrap" style="width:100%; max-width:800px; background:#000;">' +
             '<video src="assets/video/oprah_interview.mp4"' +
+              ' poster="assets/image/poster-default.jpg"' +
               ' controls playsinline webkit-playsinline preload="metadata"' +
               ' style="width:100%; display:block;"></video>' +
           '</div>' +
@@ -9813,6 +9816,130 @@
     storageSignature = progressSignature();
   }
 
+  /* ============================================================
+     静默预加载：关键剧情视频提前进浏览器缓存
+     ------------------------------------------------------------
+     目标：玩家点开邮件附件 / 时光机视频时「秒开」，不再对着黑屏转圈。
+     做法：在浏览器真正空闲时，把关键视频逐个拉进 HTTP 缓存；真正播放
+     时直接命中缓存，省掉首字节等待。
+
+     三条死规矩（任何改动都要守住）：
+       1) 绝不出声：临时的 video 一律 muted + defaultMuted，全程只
+          preload、绝不调用 play()。连 1 毫秒的隐藏声音都不会有。
+       2) 不抢主线程 / 不抢带宽：requestIdleCallback 等到浏览器真空闲
+          才启动；三个视频【串行】下载，下一个必须等上一个结束；
+          玩家正在看视频时自动让路。
+       3) 不碰坏现有播放器：预加载用的是独立的临时元素，
+          与附件抽屉 / B站播放器完全无关；下完立即断源并移除节点，
+          只把数据留在 HTTP 缓存里，不占内存。
+
+     任何一个失败都静默吞掉，绝不影响游戏本身。
+     ============================================================ */
+  function silentPreloadVideos() {
+    /* 关键剧情视频：按「玩家最可能先点开」的顺序排 */
+    const videoUrls = [
+      'assets/video/oprah_interview.mp4',   /* 奥普拉访谈 11MB，最长，优先 */
+      'assets/video/hwu_opening.mp4',       /* 时光机片头 */
+      'assets/video/HappyWithUs.mp4'        /* 附件 Happy With Us */
+    ];
+
+    /* 老内核没有 requestIdleCallback 时退化为定时器，仍然错开首屏 */
+    const onIdle = window.requestIdleCallback
+      ? function (fn) { window.requestIdleCallback(fn, { timeout: 4000 }); }
+      : function (fn) { window.setTimeout(fn, 2000); };
+
+    let i = 0;
+    let ctrl = null;           /* 当前预取的 AbortController（便于随时中止） */
+
+    /* 玩家一开始播真视频，立刻掐掉当前预取，把带宽全让出来。
+       只挂一次；捕获阶段，任何位置插入的播放器都能抓到。 */
+    if (!silentPreloadVideos._playHooked) {
+      silentPreloadVideos._playHooked = true;
+      document.addEventListener('play', function (e) {
+        const el = e.target;
+        if (!el || el.tagName !== 'VIDEO') return;
+        if (ctrl) {
+          try { ctrl.abort(); } catch (err) {}
+          ctrl = null;
+          if (i > 0) i--;      /* 这一条没下完，索引退回去，稍后重试 */
+        }
+      }, true);
+    }
+
+    function next() {
+      if (i >= videoUrls.length) return;
+
+      /* 页面上已经有真播放器（在播、或已打开未播）就让路：
+         玩家此刻在看视频，预取先等着，8 秒后再探 */
+      const live = document.querySelector('video');
+      if (live) {
+        window.setTimeout(next, 8000);
+        return;
+      }
+
+      const url = videoUrls[i++];
+
+      /* ------------------------------------------------------------
+         为什么用 fetch 流式读取，而不是塞一个不可见的 <video preload=auto>：
+         实测（Edge/Chromium）里 preload="auto" 的 video 只请求了文件尾部
+         几十 KB 就判定「能播」，整段根本没下载（buffered 报表 100%，
+         实际只传了 43KB / 2539KB），玩家点开仍要缓冲 —— 达不到秒开。
+         改成 fetch + 流式读完丢弃：整段真正落进 HTTP 缓存，
+         之后播放器再请求同一个文件是 0 字节、50ms 内出画面。
+         流式读取每次只持有一块 chunk，读完即丢，不占内存、不碰主线程。
+         ------------------------------------------------------------ */
+      const myCtrl = typeof AbortController === 'function' ? new AbortController() : null;
+      ctrl = myCtrl;
+
+      let finished = false;
+      function done() {
+        if (finished) return;
+        finished = true;
+        if (ctrl === myCtrl) ctrl = null;
+        onIdle(next);          /* 让出一帧再排下一个，串行不抢带宽 */
+      }
+
+      /* 兜底：单个视频最多 90 秒，超时就放手，别卡死队列 */
+      const timer = window.setTimeout(function () {
+        if (myCtrl) { try { myCtrl.abort(); } catch (e) {} }
+      }, 90000);
+
+      function finishAll() {
+        window.clearTimeout(timer);
+        done();
+      }
+
+      /* 优先走流式；老内核没有 body.getReader 时退回 arrayBuffer */
+      fetch(url, {
+        cache: 'force-cache',        /* 已有缓存就直接用，不重复下载 */
+        credentials: 'same-origin',
+        signal: myCtrl ? myCtrl.signal : undefined
+      }).then(function (res) {
+        if (!res.ok && res.status !== 206) throw new Error('HTTP ' + res.status);
+
+        if (res.body && typeof res.body.getReader === 'function') {
+          const reader = res.body.getReader();
+          function pump() {
+            return reader.read().then(function (r) {
+              if (r.done) return;
+              /* 丢弃这一块：只要数据流经浏览器，就已经写进 HTTP 缓存了 */
+              return pump();
+            });
+          }
+          return pump();
+        }
+        /* 兜底路径：整块读进内存再丢掉（老内核才走这里） */
+        return res.arrayBuffer();
+      }).then(finishAll).catch(function () {
+        /* 被玩家播放打断（AbortError）或网络失败：静默跳过，不影响游戏 */
+        finishAll();
+      });
+    }
+
+    /* 主界面起来后先让 3 秒（首屏渲染、登录动画都过去），再等空闲 */
+    window.setTimeout(function () { onIdle(next); }, 3000);
+  }
+
   /* 初始化入口：界面上每一处「已完成」都由存档派生，没有写死的默认值 */
   function init() {
     /* 第零件事：先把「这一帧显示谁」定下来。
@@ -9860,6 +9987,11 @@
        放在 init() 里而不是文件末尾 —— 此时 DOM 已全部就绪，
        也不会被 init 内部的任何早退分支跳过。 */
     initLogin();
+
+    /* 收尾：关键剧情视频静默预加载。
+       必须在所有渲染与登录判断之后调用 —— 它自己会再等 3 秒 + 浏览器
+       空闲才动手，绝不和首屏抢带宽，也不产生任何声音。 */
+    silentPreloadVideos();
   }
 
   init();
@@ -10057,6 +10189,107 @@
       window.clearTimeout(tipResizeTimer);
       tipResizeTimer = window.setTimeout(maybeShowFullscreenTip, 400);
     });
+
+    /* ⑤ 全屏按钮：把地址栏 / 标签栏真正让出去
+       ------------------------------------------------------------
+       只在 css 放它出来的档位（手机横屏）可见，但监听一律照挂：
+       display:none 的按钮点不到，挂着不产生任何副作用。
+       退出全屏有三条路径 —— 按钮自己、系统返回键 / 手势、电脑上按 Esc，
+       所以状态不由点击处自己改，统一交给 fullscreenchange 回写：
+       「点一下就把图标翻成退出」在系统手势退出时会对不上。 */
+    const fsBtn = document.getElementById('mobileFullscreenBtn');
+    const fsHint = document.getElementById('mobileFsHint');
+    const fsRoot = document.documentElement;
+
+    const currentFsEl = () =>
+      document.fullscreenElement || document.webkitFullscreenElement || null;
+
+    const canRequestFs = () =>
+      typeof fsRoot.requestFullscreen === 'function' ||
+      typeof fsRoot.webkitRequestFullscreen === 'function';
+
+    /* iOS Safari 至今不支持「让某个元素全屏」，只有 <video> 可以。
+       探测一次记在 html 上：css 据此把按钮整块收掉，
+       改由 #fullscreenTip 那句「向下滑动」兜底 ——
+       宁可少一个按钮，也不留一个点了没反应的。 */
+    if (!canRequestFs()) {
+      fsRoot.classList.add('no-element-fullscreen');
+    }
+
+    let fsHintTimer = 0;
+
+    function showFsHint(text) {
+      if (!fsHint) return;
+      fsHint.textContent = text;
+      fsHint.classList.add('is-on');
+      window.clearTimeout(fsHintTimer);
+      fsHintTimer = window.setTimeout(() => {
+        fsHint.classList.remove('is-on');
+      }, 3600);
+    }
+
+    /* 进 / 出全屏都要走这里：换图标、换 aria、重新量一次可视区 */
+    function applyFullscreenState() {
+      const on = !!currentFsEl();
+      fsRoot.classList.toggle('is-fullscreen', on);
+
+      if (fsBtn) {
+        fsBtn.setAttribute('aria-pressed', on ? 'true' : 'false');
+        fsBtn.setAttribute('aria-label', on ? '退出全屏' : '进入全屏');
+        fsBtn.setAttribute('title', on ? '退出全屏' : '进入全屏');
+      }
+
+      /* 工具栏收放会改变可视区高度，等浏览器把布局跑完再量一次；
+         部分安卓内核要 100~300ms 才把最终尺寸给出来，再补两次。 */
+      syncViewportNow();
+      window.setTimeout(syncViewportNow, 120);
+      window.setTimeout(syncViewportNow, 400);
+    }
+
+    if (fsBtn) {
+      fsBtn.addEventListener('click', () => {
+        /* 已在全屏：先退出。exitFullscreen 在个别内核里会同步抛错
+           （不是 Promise），所以 try/catch 与 .catch 两条都得有。 */
+        if (currentFsEl()) {
+          try {
+            if (document.exitFullscreen) document.exitFullscreen();
+            else if (document.webkitExitFullscreen) document.webkitExitFullscreen();
+          } catch (err) {
+            showFsHint('退出全屏失败，可按返回键退出');
+          }
+          return;
+        }
+
+        if (!canRequestFs()) {
+          showFsHint('当前浏览器不支持网页全屏，向下滑动可隐藏地址栏');
+          return;
+        }
+
+        try {
+          /* navigationUI: 'hide' 只有部分内核认（桌面 Chrome），
+             不认的会直接忽略这个参数，不会抛错。 */
+          const req = fsRoot.requestFullscreen
+            ? fsRoot.requestFullscreen({ navigationUI: 'hide' })
+            : fsRoot.webkitRequestFullscreen();
+
+          /* 被拒绝的常见原因：不在用户手势里、嵌在缺 allowfullscreen 的
+             iframe 里、浏览器策略不允许（部分国产内核）。
+             拒绝后不能装死，就地给一句人话。 */
+          if (req && typeof req.catch === 'function') {
+            req.catch(err => {
+              window.console.warn('[fullscreen] 请求被拒绝：', err && err.message);
+              showFsHint('浏览器拒绝了全屏请求，可向下滑动隐藏地址栏');
+            });
+          }
+        } catch (err) {
+          window.console.warn('[fullscreen] 请求异常：', err && err.message);
+          showFsHint('浏览器拒绝了全屏请求，可向下滑动隐藏地址栏');
+        }
+      });
+    }
+
+    document.addEventListener('fullscreenchange', applyFullscreenState);
+    document.addEventListener('webkitfullscreenchange', applyFullscreenState);
   })();
 
   /* ---------- 横屏首次进入：告诉玩家工具栏可以滑走 ----------
@@ -10069,6 +10302,14 @@
     if (el.dataset.done === '1') return;
     if (!window.matchMedia('(hover: none) and (pointer: coarse)').matches) return;
     if (!window.matchMedia('(orientation: landscape)').matches) return;
+
+    /* 有原生全屏按钮的浏览器不必再看这一条：按钮把工具栏收得更彻底
+       （滑动收起只是临时的，一碰屏幕就回来），两条提示同时出现只会
+       互相打岔。只有拿不到元素全屏 API 的（iOS Safari）才需要
+       「向下滑动」当替代方案 —— 那种设备上按钮已被 css 收掉。 */
+    const rootEl = document.documentElement;
+    if (typeof rootEl.requestFullscreen === 'function' ||
+        typeof rootEl.webkitRequestFullscreen === 'function') return;
 
     /* 登录屏还盖着就先别放：它 z-index 9000，提示在底下根本看不见，
        5 秒的展示窗口会白白耗掉。等玩家真正进门再数。 */

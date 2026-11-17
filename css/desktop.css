@@ -11457,3 +11457,173 @@ body.theme-search-dark .unlock-interface .unlock-back .back-link:hover {
     text-overflow: ellipsis;
   }
 }
+/* ============================================================
+   移动端全屏按钮（原生 Fullscreen API）
+   ------------------------------------------------------------
+   横屏手机最浪费的是顶部那条地址栏加底部标签栏：390 高的屏，
+   两条工具栏就吃掉 60~90px，正文只剩三百出头。
+   这里给一个真能把它们收掉的按钮 —— 原生全屏：
+   比「向下滑动隐藏工具栏」彻底得多（滑动只是临时收起，一碰屏幕就回来）。
+
+   三层开关，互不重叠：
+     · .mobile-fs 默认 display:none —— PC、平板、竖屏一律看不见；
+     · 手机横屏档（与项目其余移动端规则同一个断点）才放出来；
+     · html.no-element-fullscreen（js 探测到没有元素全屏 API，
+       主要是 iOS Safari）整块收掉，改由 #fullscreenTip 的滑动提示兜底，
+       免得放一个点了没反应的按钮。
+   ============================================================ */
+
+.mobile-fs { display: none; }
+
+/* 不支持元素全屏的浏览器：按钮点了也是空转，干脆不出现 */
+html.no-element-fullscreen .mobile-fs { display: none !important; }
+
+@media (orientation: landscape) and (max-height: 500px) {
+
+  .mobile-fs {
+    display: block;
+    position: fixed;
+    top: calc(6px + env(safe-area-inset-top, 0px));
+    right: calc(8px + env(safe-area-inset-right, 0px));
+    /* 9100：高过登录屏(9000) —— 进门之前也能点；
+       低于结局演出层(9999) —— 结局里不会漏出半个图标。 */
+    z-index: 9100;
+    /* 容器只管定位，不吃点击，免得 4px 的边距把底下的东西挡住 */
+    pointer-events: none;
+  }
+
+  .mobile-fs-btn {
+    pointer-events: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 38px;
+    height: 34px;
+    padding: 0;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    border-radius: 9px;
+    background: rgba(12, 14, 20, 0.72);
+    color: #fff;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    cursor: pointer;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    transition: background 0.16s ease, transform 0.12s ease;
+  }
+  .mobile-fs-btn:active {
+    background: rgba(12, 14, 20, 0.86);
+    transform: scale(0.94);
+  }
+  .mobile-fs-btn:focus-visible {
+    outline: 2px solid #b9a8ea;
+    outline-offset: 2px;
+  }
+
+  /* 右上角那颗「搜索」有两种落位：内容页在 .browser-bar 里，
+     资讯首页在页面自己的 .nh-nav-inner 里（距右边缘只有 20px）。
+     两处都留出同一条 52px 走廊（按键 38 + 右距 8 + 间隙 6），
+     搜索键跟着左移，全屏键独占一格 —— 否则总有一个页面被压住。
+     第二条必须带 .news-home：原有那条是 .news-home .nh-nav-inner，
+     权重 (0,2,0)，只写 .nh-nav-inner 压不住它。 */
+  html:not(.no-element-fullscreen) .browser-bar { padding-right: 52px; }
+  html:not(.no-element-fullscreen) .news-home .nh-nav-inner { padding-right: 52px; }
+
+  /* 时光机首页的导航条右端是「注册 / 登录」，原来距边缘 16~24px，
+     「登录」两个字正好落在全屏键底下。同一条走廊，一并让出来。 */
+  html:not(.no-element-fullscreen) .wbm-nav { padding-right: 52px; }
+
+  /* 进入 / 退出两个图标：只有描边，颜色跟着按钮的 currentColor 走 */
+  .fs-ico {
+    width: 18px;
+    height: 18px;
+    fill: none;
+    stroke: currentColor;
+    stroke-width: 2;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+  }
+  .fs-ico-exit { display: none; }
+  html.is-fullscreen .fs-ico-enter { display: none; }
+  html.is-fullscreen .fs-ico-exit { display: block; }
+
+  /* 拒绝全屏时就地弹一句，3.6 秒自己收走；不占布局、不吃点击。
+     width:max-content 是必需的：.mobile-fs 是个只有按钮宽的 fixed 容器，
+     absolute 子元素默认按「包含块宽度 38px」做收缩，一句话会被挤成
+     一字一行的竖条（实测宽度只剩 43px）；max-content 先按整句取宽，
+     再由 max-width 压回去换行，右边缘仍贴住按钮右沿。 */
+  .mobile-fs-hint {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    width: max-content;
+    max-width: min(72vw, 320px);
+    padding: 5px 10px;
+    border-radius: 8px;
+    background: rgba(12, 14, 20, 0.84);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 11.5px;
+    line-height: 1.5;
+    letter-spacing: 0.01em;
+    white-space: normal;
+    text-align: left;
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s linear 0.2s;
+    pointer-events: none;
+  }
+  .mobile-fs-hint.is-on {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition: opacity 0.2s ease, transform 0.2s ease, visibility 0s;
+  }
+}
+
+/* ------------------------------------------------------------
+   全屏态：让 #layout 铺满真正的那块屏
+   ------------------------------------------------------------
+   工具栏已经让出去了，可视区就等于屏幕本身，不必再算别的。
+   写在文件末尾，是为了压过前面那条「触屏平板 calc(vh - 48px)」——
+   全屏里再减 48px 会在底部留一条黑边。
+   三种写法并联：#layout 原本就是三级别 100vh / 100dvh / --app-vh，
+   这里保持同一套顺序（后者覆盖前者）。
+   ------------------------------------------------------------ */
+html.is-fullscreen #layout,
+html:fullscreen #layout,
+html:-webkit-full-screen #layout {
+  max-height: none !important;
+  height: 100vh !important;
+  height: 100dvh !important;
+  height: var(--app-vh, 100dvh) !important;
+}
+
+/* 全屏里不需要那条「向下滑动」的提示了（它已被按钮取代） */
+html.is-fullscreen .fullscreen-tip { display: none !important; }
+
+/* ------------------------------------------------------------
+   视频封面（poster）兜底
+   ------------------------------------------------------------
+   三个播放器都带 poster="assets/image/poster-default.jpg"（暗色调
+   SIGNAL LOST 雪花画面）。这里只加底色，【不改 object-fit】：
+   object-fit 一旦改成 cover，播放时 4:3 / 非 16:9 的画面会被裁切，
+   属于破坏既有播放行为。所以统一保持各播放器原本的 contain，
+   封面比例不符时最多上下留黑边 —— 底色本来就是黑的，看不出来。
+   ------------------------------------------------------------ */
+
+/* 附件抽屉：播放画面等比不裁切（原行为），仅补黑色底，封面加载前不闪白 */
+.attach-media-wrap video {
+  background: #000000;
+}
+
+/* B 站舞台（16:9）：同上 */
+.bili-stage video {
+  background: #000000;
+}
+
+/* 奥普拉外壳：同上，保持原 contain，绝不 cover */
+.video-oprah-wrap video {
+  background: #000000;
+}
