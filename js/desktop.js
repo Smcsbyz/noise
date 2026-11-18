@@ -9,6 +9,144 @@
   'use strict';
 
   /* ============================================================
+     〇、视频持久缓存（IndexedDB → Blob URL）
+     ------------------------------------------------------------
+     目的：静默预加载把视频存进 IndexedDB 后，播放直接读本地
+           Blob，第二次及以后进游戏是 0 网络请求、0 等待。
+
+     红线：
+       1) IndexedDB 不可用（隐私模式 / 老内核 / 被清）→ broken=true，
+          所有方法静默退化为「不缓存、播网络地址」，行为与旧版一致。
+       2) 只存完整 Blob：预加载被打断时绝不落库（防半截文件）。
+       3) 库名 hwu-media-cache 与存档库完全无关，互不影响。
+       4) KEY_VER 是内容版本戳：以后重编码视频时改它，
+          旧缓存自然失效，不会拿旧画质配新索引。
+     ============================================================ */
+  const VideoCache = (function () {
+    const DB_NAME = 'hwu-media-cache';
+    const STORE = 'videos';
+    const KEY_VER = 'v20261118';   /* 视频内容版本：重编码后改这里 */
+    let dbPromise = null;
+    let broken = false;
+
+    function openDb() {
+      if (broken) return Promise.resolve(null);
+      if (!dbPromise) {
+        dbPromise = new Promise(function (resolve) {
+          try {
+            if (!window.indexedDB) { broken = true; return resolve(null); }
+            const req = indexedDB.open(DB_NAME, 1);
+            req.onupgradeneeded = function () {
+              try { req.result.createObjectStore(STORE); } catch (e) {}
+            };
+            req.onsuccess = function () { resolve(req.result); };
+            req.onerror = function () { broken = true; resolve(null); };
+            req.onblocked = function () { resolve(null); };
+          } catch (e) {
+            broken = true;
+            resolve(null);
+          }
+        });
+      }
+      return dbPromise;
+    }
+
+    function keyOf(url) { return url + '|' + KEY_VER; }
+
+    function get(url) {
+      return openDb().then(function (db) {
+        if (!db) return null;
+        return new Promise(function (resolve) {
+          try {
+            const tx = db.transaction(STORE, 'readonly');
+            const rq = tx.objectStore(STORE).get(keyOf(url));
+            rq.onsuccess = function () {
+              resolve(rq.result instanceof Blob ? rq.result : null);
+            };
+            rq.onerror = function () { resolve(null); };
+          } catch (e) { resolve(null); }
+        });
+      });
+    }
+
+    function put(url, blob) {
+      return openDb().then(function (db) {
+        if (!db) return false;
+        return new Promise(function (resolve) {
+          try {
+            const tx = db.transaction(STORE, 'readwrite');
+            tx.objectStore(STORE).put(blob, keyOf(url));
+            tx.oncomplete = function () { resolve(true); };
+            tx.onerror = function () { resolve(false); };
+            tx.onabort = function () { resolve(false); };
+          } catch (e) { resolve(false); }
+        });
+      });
+    }
+
+    function has(url) { return get(url).then(function (b) { return !!b; }); }
+
+    /* 播放入口：命中缓存 → Blob URL；否则原样返回网络地址 */
+    function srcFor(url) {
+      return get(url).then(function (blob) {
+        if (blob) {
+          try { return URL.createObjectURL(blob); } catch (e) {}
+        }
+        return url;
+      });
+    }
+
+    return { get: get, put: put, has: has, srcFor: srcFor };
+  })();
+
+  /* 把 DOM 里「还没升级」的 <video src="assets/video/..."> 换成 Blob 地址。
+     只动命中缓存的元素；未命中保持原样（继续走 HTTP 缓存 / 网络）。
+     Blob URL 挂在元素私有属性上，元素被移出文档时统一 revoke。 */
+  function upgradeVideosIn(root) {
+    const scope = root && root.querySelectorAll ? root : document;
+    const list = scope.querySelectorAll('video[src^="assets/video/"]');
+    for (let i = 0; i < list.length; i++) {
+      const el = list[i];
+      if (el.dataset.vc) continue;           /* 已处理过，跳过 */
+      el.dataset.vc = 'pending';
+      const netSrc = el.getAttribute('src') || '';
+      VideoCache.srcFor(netSrc).then(function (blobUrl) {
+        if (!el.isConnected || el.dataset.vc !== 'pending') return;
+        el.dataset.vc = 'done';
+        if (blobUrl !== netSrc) {
+          el._vcBlobUrl = blobUrl;
+          el.src = blobUrl;
+        }
+      }).catch(function () {
+        el.dataset.vc = 'done';
+      });
+    }
+
+    /* 只挂一次的清扫器：video 离开文档就回收 Blob URL */
+    if (!upgradeVideosIn._sweeper && window.MutationObserver) {
+      upgradeVideosIn._sweeper = new MutationObserver(function (muts) {
+        for (let m = 0; m < muts.length; m++) {
+          const gone = muts[m].removedNodes || [];
+          for (let j = 0; j < gone.length; j++) {
+            const n = gone[j];
+            if (n.nodeType !== 1) continue;
+            const vids = n.tagName === 'VIDEO' ? [n]
+              : (n.querySelectorAll ? n.querySelectorAll('video') : []);
+            for (let k = 0; k < vids.length; k++) {
+              const v = vids[k];
+              if (v._vcBlobUrl) {
+                try { URL.revokeObjectURL(v._vcBlobUrl); } catch (e) {}
+                v._vcBlobUrl = null;
+              }
+            }
+          }
+        }
+      });
+      upgradeVideosIn._sweeper.observe(document, { childList: true, subtree: true });
+    }
+  }
+
+  /* ============================================================
      一、视图切换（不刷新页面，仅切换主内容区显示状态）
      ============================================================ */
 
@@ -2341,6 +2479,9 @@
 
     /* 关键一句：插到被点卡片的紧后面 */
     clickedCard.insertAdjacentElement('afterend', drawer);
+
+    /* 附件视频升级：预加载已落 IndexedDB 的，直接换本地 Blob 地址（零网络） */
+    upgradeVideosIn(drawer);
 
     /* 媒体读不出来时只把这一块换成一句话：卡片和列表都还在，能再点一次收起 */
     const media = drawer.querySelector('img, video');
@@ -5855,6 +5996,9 @@
        刷新、后退、重新打开同一页，收过的词都还是灰的。 */
     markCollectedKeywords(browserArea);
 
+    /* 页面里的 <video>（时光机 B站页 / 奥普拉页）：命中持久缓存就换 Blob 地址 */
+    upgradeVideosIn(browserArea);
+
     /* 进入首页时等内容就位，再把搜索框搬进站内导航 */
     if (isHome) {
       setBrowserChrome(true);
@@ -7318,6 +7462,9 @@
 
     /* 快照里的帖子正文同样支持 *加粗* / [[关键词]] */
     applyRichText(screen);
+
+    /* 快照页如含 <video>，命中持久缓存就换 Blob 地址 */
+    upgradeVideosIn(screen);
 
     /* 换页后回到顶部，否则会停在上一个快照的滚动位置 */
     if (wbSnapshotBody) wbSnapshotBody.scrollTop = 0;
@@ -9829,9 +9976,9 @@
        2) 不抢主线程 / 不抢带宽：requestIdleCallback 等到浏览器真空闲
           才启动；三个视频【串行】下载，下一个必须等上一个结束；
           玩家正在看视频时自动让路。
-       3) 不碰坏现有播放器：预加载用的是独立的临时元素，
-          与附件抽屉 / B站播放器完全无关；下完立即断源并移除节点，
-          只把数据留在 HTTP 缓存里，不占内存。
+       3) 不碰坏现有播放器：预加载用的是独立 fetch 流，与附件抽屉 /
+          B站播放器完全无关；下完整段才落 IndexedDB（VideoCache），
+          中断的半截一律丢弃，绝不产生声音、不占常驻内存。
 
      任何一个失败都静默吞掉，绝不影响游戏本身。
      ============================================================ */
@@ -9892,6 +10039,8 @@
       ctrl = myCtrl;
 
       let finished = false;
+      const chunks = [];        /* 流式下载的分块，完整后才一次性落 IndexedDB */
+      let gotFull = false;      /* 只有正常读到流末尾才置 true；中断绝不存半截 */
       function done() {
         if (finished) return;
         finished = true;
@@ -9906,34 +10055,56 @@
 
       function finishAll() {
         window.clearTimeout(timer);
+        /* 整段完整拿到的视频落进 IndexedDB（中断的半截绝不入库）。
+           失败静默：缓存写不进去也无所谓，播放仍走 HTTP 缓存/网络。 */
+        if (gotFull && chunks.length) {
+          try { VideoCache.put(url, new Blob(chunks, { type: 'video/mp4' })); } catch (e) {}
+        }
+        chunks.length = 0;
+        gotFull = false;
         done();
       }
 
       /* 优先走流式；老内核没有 body.getReader 时退回 arrayBuffer */
-      fetch(url, {
-        cache: 'force-cache',        /* 已有缓存就直接用，不重复下载 */
-        credentials: 'same-origin',
-        signal: myCtrl ? myCtrl.signal : undefined
-      }).then(function (res) {
-        if (!res.ok && res.status !== 206) throw new Error('HTTP ' + res.status);
+      function startFetch() {
+        fetch(url, {
+          cache: 'force-cache',        /* 已有缓存就直接用，不重复下载 */
+          credentials: 'same-origin',
+          signal: myCtrl ? myCtrl.signal : undefined
+        }).then(function (res) {
+          if (!res.ok && res.status !== 206) throw new Error('HTTP ' + res.status);
 
-        if (res.body && typeof res.body.getReader === 'function') {
-          const reader = res.body.getReader();
-          function pump() {
-            return reader.read().then(function (r) {
-              if (r.done) return;
-              /* 丢弃这一块：只要数据流经浏览器，就已经写进 HTTP 缓存了 */
-              return pump();
-            });
+          if (res.body && typeof res.body.getReader === 'function') {
+            const reader = res.body.getReader();
+            function pump() {
+              return reader.read().then(function (r) {
+                if (r.done) { gotFull = true; return; }
+                /* 数据流经浏览器的同时也写进 HTTP 缓存；
+                   分块先攒着，读到流末尾才整段落 IndexedDB */
+                chunks.push(r.value);
+                return pump();
+              });
+            }
+            return pump();
           }
-          return pump();
-        }
-        /* 兜底路径：整块读进内存再丢掉（老内核才走这里） */
-        return res.arrayBuffer();
-      }).then(finishAll).catch(function () {
-        /* 被玩家播放打断（AbortError）或网络失败：静默跳过，不影响游戏 */
-        finishAll();
-      });
+          /* 兜底路径：整块读进内存（老内核才走这里），同样送进持久缓存 */
+          return res.arrayBuffer().then(function (buf) {
+            chunks.push(new Uint8Array(buf));
+            gotFull = true;
+          });
+        }).then(finishAll).catch(function () {
+          /* 被玩家播放打断（AbortError）或网络失败：半截数据一律丢弃 */
+          chunks.length = 0;
+          gotFull = false;
+          finishAll();
+        });
+      }
+
+      /* 已经在持久缓存里 → 这一轮直接跳过，不占任何带宽 */
+      VideoCache.has(url).then(function (cached) {
+        if (cached) { finishAll(); return; }
+        startFetch();
+      }).catch(finishAll);
     }
 
     /* 主界面起来后先让 3 秒（首屏渲染、登录动画都过去），再等空闲 */

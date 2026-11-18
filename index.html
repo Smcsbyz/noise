@@ -7,7 +7,7 @@
 <!-- 内联空图标：省掉浏览器对 /favicon.ico 的那次 404 请求（纯噪音，不影响玩法） -->
 <link rel="icon" href="data:,">
 <link rel="stylesheet" href="css/common.css?v=20261114L">
-<link rel="stylesheet" href="css/desktop.css?v=20261116BB">
+<link rel="stylesheet" href="css/desktop.css?v=20261117A">
 </head>
 <body>
 
@@ -468,6 +468,37 @@
   </button>
 </div>
 
+<!-- ================= 移动端全屏按钮 =================
+     只在手机横屏由 css 放出来（PC 端整块 display:none），
+     点击走原生 Fullscreen API，把地址栏 / 标签栏让出去。
+     · 两个图标靠 css 的切换（html.is-fullscreen）显示，
+       js 只负责 aria-label / aria-pressed，不做 innerHTML 替换。
+     · #mobileFsHint 是「浏览器拒绝全屏」时的就地提示，
+       不支持元素全屏的浏览器（iOS Safari）整个按钮会被 css 收掉，
+       改由 #fullscreenTip 那句「向下滑动」兜底。
+     · 层级 9100：高过登录屏(9000)，所以进门之前也能点；
+       低于结局演出层(9999)，不会在结局里露出半个图标。
+     必须放在下面两个 <script> 之前：js 初始化时要 getElementById 拿到它。
+     ==================================================================== -->
+<div class="mobile-fs" id="mobileFs">
+  <button class="mobile-fs-btn" id="mobileFullscreenBtn" type="button"
+          aria-label="进入全屏" aria-pressed="false" title="进入全屏">
+    <svg class="fs-ico fs-ico-enter" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9"/>
+      <path d="M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9"/>
+      <path d="M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15"/>
+      <path d="M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/>
+    </svg>
+    <svg class="fs-ico fs-ico-exit" viewBox="0 0 24 24" aria-hidden="true">
+      <path d="M9 4v4.5A1.5 1.5 0 0 1 7.5 10H4"/>
+      <path d="M20 9h-3.5A1.5 1.5 0 0 1 15 7.5V4"/>
+      <path d="M15 20v-4.5a1.5 1.5 0 0 1 1.5-1.5H20"/>
+      <path d="M4 15h3.5A1.5 1.5 0 0 1 9 16.5V20"/>
+    </svg>
+  </button>
+  <span class="mobile-fs-hint" id="mobileFsHint" role="status" aria-live="polite"></span>
+</div>
+
 <!-- ================= 结局 / 提示弹窗 ================= -->
 <div id="modal" class="modal hidden">
   <div class="modal-card">
@@ -493,7 +524,7 @@
      ==================================================================== -->
 <div id="fullscreenTip" class="fullscreen-tip">向下滑动可隐藏浏览器工具栏，画面会更大</div>
 <script src="js/chat.js?v=20261114L"></script>
-<script src="js/desktop.js?v=20261116BN"></script>
+<script src="js/desktop.js?v=20261118A"></script>
 
 <!-- ================= 竖屏提示（仅手机竖屏显示，纯 CSS 控制） =================
      手机竖屏时全屏黑底遮罩，阻止一切操作，提示玩家转成横屏。
