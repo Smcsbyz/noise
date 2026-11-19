@@ -21,13 +21,24 @@
        3) 库名 hwu-media-cache 与存档库完全无关，互不影响。
        4) KEY_VER 是内容版本戳：以后重编码视频时改它，
           旧缓存自然失效，不会拿旧画质配新索引。
+       5) 【移动端防线】库里连大小一起存，读出来先对账：
+          对不上（iOS Safari 的 IDB Blob 有截断史）就当没有，
+          删掉记录、回退网络地址，绝不让半截数据进 <video>。
+       6) 同一会话里 Blob 连续播挂两次 → 整个会话不再用 Blob，
+          后面的视频直接走网络，避免每条都先失败一次。
      ============================================================ */
   const VideoCache = (function () {
     const DB_NAME = 'hwu-media-cache';
     const STORE = 'videos';
+    const DB_VER = 2;              /* v2：值从裸 Blob 改成 {blob,size} */
     const KEY_VER = 'v20261118';   /* 视频内容版本：重编码后改这里 */
+    const OFF_KEY = 'hwu-vc-blob-off';
     let dbPromise = null;
     let broken = false;
+    /* 会话级熔断：Blob 播放失败两次就不再尝试 */
+    let blobFails = 0;
+    let blobOff = false;
+    try { blobOff = window.sessionStorage.getItem(OFF_KEY) === '1'; } catch (e) {}
 
     function openDb() {
       if (broken) return Promise.resolve(null);
@@ -35,9 +46,17 @@
         dbPromise = new Promise(function (resolve) {
           try {
             if (!window.indexedDB) { broken = true; return resolve(null); }
-            const req = indexedDB.open(DB_NAME, 1);
-            req.onupgradeneeded = function () {
-              try { req.result.createObjectStore(STORE); } catch (e) {}
+            const req = indexedDB.open(DB_NAME, DB_VER);
+            req.onupgradeneeded = function (e) {
+              /* 结构升级：旧版裸 Blob 没有大小信息，无法校验完整性，
+                 直接重建库让它们失效（视频会重新预载一次，代价很小）。 */
+              try {
+                const db = req.result;
+                if (e.oldVersion < DB_VER && db.objectStoreNames.contains(STORE)) {
+                  db.deleteObjectStore(STORE);
+                }
+                if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+              } catch (err) {}
             };
             req.onsuccess = function () { resolve(req.result); };
             req.onerror = function () { broken = true; resolve(null); };
@@ -53,6 +72,14 @@
 
     function keyOf(url) { return url + '|' + KEY_VER; }
 
+    function removeRaw(db, key) {
+      try {
+        const tx = db.transaction(STORE, 'readwrite');
+        tx.objectStore(STORE).delete(key);
+      } catch (e) {}
+    }
+
+    /* 读：校验大小。损坏记录顺手删掉，下次预载会重新写入。 */
     function get(url) {
       return openDb().then(function (db) {
         if (!db) return null;
@@ -61,7 +88,15 @@
             const tx = db.transaction(STORE, 'readonly');
             const rq = tx.objectStore(STORE).get(keyOf(url));
             rq.onsuccess = function () {
-              resolve(rq.result instanceof Blob ? rq.result : null);
+              const rec = rq.result;
+              const blob = rec && rec.blob;
+              if (!(blob instanceof Blob) || !blob.size) { resolve(null); return; }
+              if (rec.size && blob.size !== rec.size) {
+                removeRaw(db, keyOf(url));   /* 截断/损坏 → 丢弃 */
+                resolve(null);
+                return;
+              }
+              resolve(blob);
             };
             rq.onerror = function () { resolve(null); };
           } catch (e) { resolve(null); }
@@ -75,7 +110,10 @@
         return new Promise(function (resolve) {
           try {
             const tx = db.transaction(STORE, 'readwrite');
-            tx.objectStore(STORE).put(blob, keyOf(url));
+            tx.objectStore(STORE).put(
+              { blob: blob, size: blob.size, ts: Date.now() },
+              keyOf(url)
+            );
             tx.oncomplete = function () { resolve(true); };
             tx.onerror = function () { resolve(false); };
             tx.onabort = function () { resolve(false); };
@@ -84,10 +122,38 @@
       });
     }
 
+    function drop(url) {
+      return openDb().then(function (db) {
+        if (db) removeRaw(db, keyOf(url));
+        return true;
+      }).catch(function () { return false; });
+    }
+
     function has(url) { return get(url).then(function (b) { return !!b; }); }
+
+    /* 播放过一次 Blob 失败：计数，超阈值本会话全面改用网络地址 */
+    function markBlobBroken() {
+      blobFails++;
+      if (blobFails >= 2 && !blobOff) {
+        blobOff = true;
+        try { window.sessionStorage.setItem(OFF_KEY, '1'); } catch (e) {}
+      }
+    }
+
+    /* iOS / iPadOS：Safari 读回 IDB 里的 Blob 有截断与解码失败的历史，
+       而它在 HTTP 缓存上本来就够快（GitHub Pages 支持 Range），
+       所以这里直接不用 Blob 播放，改走网络地址——少一层风险。 */
+    const IS_IOS = (function () {
+      try {
+        const ua = navigator.userAgent || '';
+        if (/iP(hone|ad|od)/.test(ua)) return true;
+        return navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1;
+      } catch (e) { return false; }
+    })();
 
     /* 播放入口：命中缓存 → Blob URL；否则原样返回网络地址 */
     function srcFor(url) {
+      if (blobOff || IS_IOS) return Promise.resolve(url);
       return get(url).then(function (blob) {
         if (blob) {
           try { return URL.createObjectURL(blob); } catch (e) {}
@@ -96,7 +162,10 @@
       });
     }
 
-    return { get: get, put: put, has: has, srcFor: srcFor };
+    return {
+      get: get, put: put, has: has, drop: drop,
+      srcFor: srcFor, markBlobBroken: markBlobBroken
+    };
   })();
 
   /* 把 DOM 里「还没升级」的 <video src="assets/video/..."> 换成 Blob 地址。
@@ -107,15 +176,19 @@
     const list = scope.querySelectorAll('video[src^="assets/video/"]');
     for (let i = 0; i < list.length; i++) {
       const el = list[i];
+      guardVideo(el);
       if (el.dataset.vc) continue;           /* 已处理过，跳过 */
       el.dataset.vc = 'pending';
       const netSrc = el.getAttribute('src') || '';
+      el.dataset.vcNet = netSrc;
       VideoCache.srcFor(netSrc).then(function (blobUrl) {
         if (!el.isConnected || el.dataset.vc !== 'pending') return;
         el.dataset.vc = 'done';
         if (blobUrl !== netSrc) {
           el._vcBlobUrl = blobUrl;
+          const keep = el.currentTime || 0;
           el.src = blobUrl;
+          if (keep > 0.2) { try { el.currentTime = keep; } catch (e) {} }
         }
       }).catch(function () {
         el.dataset.vc = 'done';
@@ -144,6 +217,88 @@
       });
       upgradeVideosIn._sweeper.observe(document, { childList: true, subtree: true });
     }
+  }
+
+  /* ------------------------------------------------------------
+     视频兜底：任何一条 <video> 出错，先自动救，救不回来才报错。
+     ------------------------------------------------------------
+     移动端踩过的坑：
+       · IDB 里取回的 Blob 可能被截断（iOS Safari）→ 解码失败；
+       · 手机网络下 mp4 请求中途被掐断 → MEDIA_ERR_NETWORK；
+       · 国内手机直连 github.io，大文件经常拉一半就断（页面本身
+         能开，所以玩家只会看到视频坏了）。
+     处理顺序（每失败一次往下走一步）：
+       ① 正在播 Blob 却报错 → 删掉这条缓存，改播网络地址；
+       ② 换 jsDelivr 镜像地址（github.io 上才启用，国内可达）；
+       ③ 原地址加时间戳重试一次（绕开坏缓存 / CDN 副本）；
+       ④ 还不行 → 调元素上的 _vcOnFatal（各页面自己的降级 UI）。
+     全程静默，玩家最多看到播放器闪一下。
+     ------------------------------------------------------------ */
+
+  /* 推导 jsDelivr 镜像地址。仅在站点本身部署在 *.github.io 时有意义：
+       用户页  https://user.github.io/xxx.mp4        → gh/user/user.github.io@main/xxx.mp4
+       项目页  https://user.github.io/repo/xxx.mp4   → gh/user/repo@main/xxx.mp4
+     注意：项目页 URL 里的 /repo 段对应仓库名本身，不能再拼进文件路径。
+     本地或其他托管返回 null，跳过这一步。 */
+  function mirrorSrcOf(netSrc) {
+    try {
+      const host = window.location.hostname || '';
+      if (!/\.github\.io$/i.test(host)) return null;
+      const user = host.replace(/\.github\.io$/i, '').toLowerCase();
+      const segs = window.location.pathname.split('/').filter(Boolean);
+      const repo = segs.length ? segs[0] : user + '.github.io';
+      const path = netSrc.charAt(0) === '/' ? netSrc : '/' + netSrc;
+      return 'https://cdn.jsdelivr.net/gh/' + user + '/' + repo + '@main' + path;
+    } catch (e) { return null; }
+  }
+
+  function guardVideo(el) {
+    if (!el || el.dataset.vcGuard) return;
+    el.dataset.vcGuard = '1';
+    let attempts = null;       /* 第一次出错时建好的候选队列，逐个试 */
+
+    function buildAttempts(netSrc) {
+      const list = [];
+      const mirror = mirrorSrcOf(netSrc);
+      if (mirror) list.push(mirror);
+      list.push(netSrc + (netSrc.indexOf('?') >= 0 ? '&' : '?') + 'r=' + Date.now());
+      return list;
+    }
+
+    el.addEventListener('error', function () {
+      const netSrc = el.dataset.vcNet || el.getAttribute('src') || '';
+      if (!netSrc) return;
+
+      /* ① 本地 Blob 播不了：判它坏，清除后回退网络 */
+      if (el._vcBlobUrl) {
+        try { URL.revokeObjectURL(el._vcBlobUrl); } catch (e) {}
+        el._vcBlobUrl = null;
+        VideoCache.drop(netSrc);
+        VideoCache.markBlobBroken();
+        el.dataset.vc = 'done';
+        try {
+          el.src = netSrc;
+          el.load();
+        } catch (e) {}
+        return;
+      }
+
+      /* ②③ 逐个候选地址重试（镜像 → 带时间戳原址） */
+      if (!attempts) attempts = buildAttempts(netSrc);
+      const next = attempts.shift();
+      if (next) {
+        try {
+          el.src = next;
+          el.load();
+        } catch (e) {}
+        return;
+      }
+
+      /* ④ 彻底失败：交给页面自己的降级 UI（带上 MediaError 码，便于定位） */
+      if (typeof el._vcOnFatal === 'function') {
+        try { el._vcOnFatal(el.error ? el.error.code : 0); } catch (e) {}
+      }
+    });
   }
 
   /* ============================================================
@@ -2353,9 +2508,18 @@
   }
 
   /* 媒体读不出来时把这一个预览块换成一句话，卡片和列表都留着 */
-  function attachErrorHtml(text) {
+  function attachErrorHtml(text, mediaSrc) {
+    /* 视频失败时给两条出路：重试一次，或直接在新窗口用系统播放器打开
+       （某些手机浏览器内联播放被限制，外开反而一定成功）。 */
+    const actions = mediaSrc
+      ? '<p class="attach-error-actions">' +
+          '<button type="button" class="attach-retry" data-attach-retry="1">重新加载</button>' +
+          '<a class="attach-open-link" href="' + escapeHtml(mediaSrc) + '" target="_blank" rel="noopener">在新窗口打开</a>' +
+        '</p>'
+      : '';
     return '<div class="attach-media-wrap">' +
         '<p class="attach-empty-tip">' + escapeHtml(text) + '</p>' +
+        actions +
       '</div>';
   }
 
@@ -2483,16 +2647,40 @@
     /* 附件视频升级：预加载已落 IndexedDB 的，直接换本地 Blob 地址（零网络） */
     upgradeVideosIn(drawer);
 
-    /* 媒体读不出来时只把这一块换成一句话：卡片和列表都还在，能再点一次收起 */
+    /* 媒体读不出来时只把这一块换成提示：卡片和列表都还在，能再点一次收起。
+       注意：error 事件先由 guardVideo 接管（本地 Blob → 网络 → 带参数重试），
+       只有都救不回来，才走到这里——所以文案不写「已损坏」，只写「没加载出来」，
+       并留一个重新加载按钮和「在新窗口打开」的出口。 */
     const media = drawer.querySelector('img, video');
     if (media) {
-      media.addEventListener('error', () => {
+      media._vcOnFatal = (errCode) => {
+        const reason = ({
+          1: '播放被中断',
+          2: '网络中断',
+          3: '解码失败',
+          4: '网络或格式问题'
+        })[errCode] || '';
         console.warn('[' + (file.type === 'image' ? 'IMAGE' : 'VIDEO') + '] 附件缺失或无法读取：' +
-          (src || name) + '（不影响游戏）');
-        drawer.innerHTML = attachErrorHtml(file.type === 'image'
-          ? '这张图已经打不开了'
-          : '这段录像已经损坏，无法播放');
-      });
+          (src || name) + ' code=' + (errCode || 0) + '（不影响游戏）');
+        const isVideo = file.type !== 'image';
+        drawer.innerHTML = attachErrorHtml(
+          isVideo
+            ? '这段录像没能加载出来' + (reason ? '（' + reason + '）' : '')
+            : '这张图已经打不开了',
+          isVideo ? src : ''
+        );
+        const retryBtn = drawer.querySelector('[data-attach-retry]');
+        if (retryBtn) {
+          retryBtn.addEventListener('click', () => {
+            try { drawer.remove(); } catch (e) {}
+            openAttachment(id);       /* 摘掉重开 = 全新的 <video>，从零再试 */
+          });
+        }
+      };
+      if (media.tagName === 'IMG') {
+        /* 图片没有 Blob 缓存那套兜底，保持原来的单次错误处理 */
+        media.addEventListener('error', () => media._vcOnFatal());
+      }
     }
 
     markAttachCardActive(id);

@@ -10590,11 +10590,49 @@ body.theme-search-dark #bg-glow.is-on {
 /* 媒体加载失败时的一句话（黑底上要够亮） */
 .attach-drawer .attach-empty-tip {
   margin: 0;
-  padding: 24px 16px;
+  padding: 24px 16px 6px;
   text-align: center;
   font-size: 13px;
   letter-spacing: 0.04em;
   color: #9a9aa2;
+}
+
+/* 失败提示下面的两个出口：重新加载 / 新窗口打开 */
+.attach-drawer .attach-error-actions {
+  margin: 0;
+  padding: 0 16px 22px;
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.attach-drawer .attach-retry,
+.attach-drawer .attach-open-link {
+  appearance: none;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: transparent;
+  color: #d6d4e2;
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  padding: 8px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.18s ease, border-color 0.18s ease, color 0.18s ease;
+}
+
+.attach-drawer .attach-retry:hover,
+.attach-drawer .attach-open-link:hover {
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.45);
+  color: #ffffff;
+}
+
+.attach-drawer .attach-retry:active {
+  transform: translateY(1px);
 }
 
 /* 展开中的那张卡片：描紫边，说明「这条正在下面播」 */
